@@ -116,9 +116,8 @@ class SturdyChat_RAG
         $cptHint  = self::inferCptHint($query);
         $dateHint = self::parseDutchDate($query);
 
-        // (2) Indexkeuze + CPT-routing
-        $tableChoice  = ($s['retrieval_index'] ?? 'wp') === 'sitemap' ? 'sitemap' : 'wp';
-        $primaryTable = $tableChoice === 'sitemap' ? STURDYCHAT_TABLE_SITEMAP : STURDYCHAT_TABLE;
+        // (2) Indexkeuze + CPT-routing (enkel sitemap)
+        $primaryTable = STURDYCHAT_TABLE_SITEMAP;
 
         $candidates = [];
 
@@ -131,7 +130,7 @@ class SturdyChat_RAG
             $candidates = self::lexicalCandidatesFromTable($primaryTable, $query);
         }
 
-        if (!$candidates && $tableChoice === 'sitemap') {
+        if (!$candidates) {
             // allerlaatste reddingsboei: grof op CPT
             $fallback = self::lexicalCandidatesByCpt($primaryTable, $cptHint ?: 'nieuws', $query, 500);
             if ($fallback) {

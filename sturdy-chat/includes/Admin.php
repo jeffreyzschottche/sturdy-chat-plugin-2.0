@@ -94,24 +94,6 @@ class SturdyChat_Admin
             'sturdychat_main'
         );
 
-        // New: Retrieval index selector
-        add_settings_field(
-            'retrieval_index',
-            'Retrieval index',
-            function (): void {
-                $s = get_option('sturdychat_settings', []);
-                $v = $s['retrieval_index'] ?? 'wp'; // 'wp' | 'sitemap'
-                ?>
-                <select name="sturdychat_settings[retrieval_index]">
-                    <option value="wp" <?php selected($v, 'wp'); ?>>WP index only</option>
-                    <option value="sitemap" <?php selected($v, 'sitemap'); ?>>Sitemap index only</option>
-                </select>
-                <p class="description">Which index the retriever should query by default.</p>
-                <?php
-            },
-            'sturdychat',
-            'sturdychat_main'
-        );
     }
 
     /**
@@ -151,8 +133,7 @@ class SturdyChat_Admin
         $out['chat_title']         = !empty($in['chat_title']) ? sanitize_text_field($in['chat_title']) : 'Stel je vraag';
 
         // New
-        $out['sitemap_url']     = isset($in['sitemap_url']) ? esc_url_raw($in['sitemap_url']) : home_url('/sitemap_index.xml');
-        $out['retrieval_index'] = in_array(($in['retrieval_index'] ?? 'wp'), ['wp', 'sitemap'], true) ? $in['retrieval_index'] : 'wp';
+        $out['sitemap_url'] = isset($in['sitemap_url']) ? esc_url_raw($in['sitemap_url']) : home_url('/sitemap_index.xml');
 
         return $out;
     }
@@ -362,13 +343,6 @@ class SturdyChat_Admin
             return;
         }
 
-        if (isset($_POST['sturdychat_reindex_now']) && check_admin_referer('sturdychat_reindex_now_action', 'sturdychat_reindex_now_nonce')) {
-            $s   = get_option('sturdychat_settings', []);
-            $res = SturdyChat_Indexer::indexAll($s);
-            $cls = $res['ok'] ? 'notice-success' : 'notice-error';
-            echo '<div class="notice ' . esc_attr($cls) . '"><p>' . esc_html($res['message']) . '</p></div>';
-        }
-
         echo '<div class="wrap"><h1>Sturdy Chat (Self-Hosted RAG)</h1>';
         echo '<form method="post" action="options.php">';
         settings_fields('sturdychat_settings_group');
@@ -376,10 +350,7 @@ class SturdyChat_Admin
         submit_button(__('Save settings', 'sturdychat-chatbot'));
         echo '</form>';
 
-        echo '<hr/><form method="post" action="">';
-        wp_nonce_field('sturdychat_reindex_now_action', 'sturdychat_reindex_now_nonce');
-        submit_button(__('(Re)index now', 'sturdychat-chatbot'), 'secondary', 'sturdychat_reindex_now', false);
-        echo '</form></div>';
+        echo '</div>';
     }
 
     /**

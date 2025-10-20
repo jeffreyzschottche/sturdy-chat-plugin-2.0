@@ -172,19 +172,5 @@ add_action('plugins_loaded', function () {
         <?php return ob_get_clean();
     });
 
-    /**
-     * Incremental re-index at publish/update
-     */
-    add_action('save_post', function ($post_id, $post) {
-        if (wp_is_post_revision($post_id) || $post->post_status !== 'publish')
-            return;
-        $s = get_option('sturdychat_settings', []);
-
-        // fallback
-        $types = (array) ($s['index_post_types'] ?? sturdychat_all_public_types());
-        if (!in_array($post->post_type, $types, true))
-            return;
-
-        SturdyChat_Indexer::indexPosts([$post_id], $s);
-    }, 10, 2);
+    // WP index is deprecated; sitemap worker handles crawling.
 });
