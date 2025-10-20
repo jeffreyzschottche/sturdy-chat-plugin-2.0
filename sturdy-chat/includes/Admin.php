@@ -371,33 +371,42 @@ class SturdyChat_Admin
         check_admin_referer('sturdychat_index_sitemap');
 
         $s   = get_option('sturdychat_settings', []);
-        $res = SturdyChat_SitemapIndexer::indexAll($s);
+        $res    = SturdyChat_SitemapIndexer::indexAll($s);
+        $queued = (int) ($res['queued'] ?? 0);
 
         if ($res['ok']) {
-            // Drain the queue immediately so the admin sees the final state, even if WP-Cron is disabled.
-            $cronScheduled = (bool) wp_next_scheduled('sturdychat_sitemap_worker');
-            $drain         = SturdyChat_SitemapIndexer::drainQueueSynchronously($cronScheduled ? 25 : 50);
+            if ($queued === 0) {
+                $res['message'] = __('Sitemap already indexed. 0 new URLs to process.', 'sturdychat-chatbot');
+            } else {
+                // Drain the queue immediately so the admin sees the final state, even if WP-Cron is disabled.
+                $cronScheduled = (bool) wp_next_scheduled('sturdychat_sitemap_worker');
+                $drain         = SturdyChat_SitemapIndexer::drainQueueSynchronously($cronScheduled ? 25 : 50, $cronScheduled ? 20 : 45);
+                $snapshot      = SturdyChat_SitemapIndexer::getQueueSnapshot();
 
-            if ($drain['ran']) {
-                if ($drain['remaining'] === 0) {
-                    if ($drain['processed'] > 0) {
-                        $res['message'] = sprintf(
-                            _n(
-                                'Indexed %d new URL from the sitemap immediately.',
-                                'Indexed %d new URLs from the sitemap immediately.',
-                                $drain['processed'],
-                                'sturdychat-chatbot'
-                            ),
-                            $drain['processed']
-                        );
-                    } else {
-                        $res['message'] = __('Sitemap already indexed. 0 new URLs to process.', 'sturdychat-chatbot');
-                    }
+                $remaining = max(0, (int) ($snapshot['remaining'] ?? $drain['remaining'] ?? 0));
+                $processed = max(
+                    0,
+                    (int) ($drain['processed'] ?? 0),
+                    (int) ($snapshot['processed'] ?? 0),
+                    $queued - $remaining
+                );
+
+                if ($remaining === 0) {
+                    $processed = ($processed > 0) ? $processed : $queued;
+                    $res['message'] = sprintf(
+                        _n(
+                            'Indexed %d new URL from the sitemap immediately.',
+                            'Indexed %d new URLs from the sitemap immediately.',
+                            $processed,
+                            'sturdychat-chatbot'
+                        ),
+                        $processed
+                    );
                 } else {
                     $res['message'] = sprintf(
                         __('Indexed %1$d URLs immediately; %2$d remaining in background queue.', 'sturdychat-chatbot'),
-                        $drain['processed'],
-                        $drain['remaining']
+                        $processed,
+                        $remaining
                     );
                 }
             }

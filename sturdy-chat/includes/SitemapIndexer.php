@@ -31,7 +31,11 @@ final class SturdyChat_SitemapIndexer
 
         $childSitemaps = self::fetchSitemapIndex($root);
         if (empty($childSitemaps)) {
-            return ['ok' => false, 'message' => 'No child sitemaps parsed at ' . $root . '.'];
+            return [
+                'ok'      => false,
+                'message' => 'No child sitemaps parsed at ' . $root . '.',
+                'queued'  => 0,
+            ];
         }
 
         $urls = [];
@@ -46,7 +50,11 @@ final class SturdyChat_SitemapIndexer
         }
         $urls = array_values(array_unique($urls));
         if (empty($urls)) {
-            return ['ok' => false, 'message' => 'Child sitemaps had no URLs.'];
+            return [
+                'ok'      => false,
+                'message' => 'Child sitemaps had no URLs.',
+                'queued'  => 0,
+            ];
         }
 
         // Skip URLs that are already indexed in the sitemap chunk table.
@@ -71,7 +79,11 @@ final class SturdyChat_SitemapIndexer
             delete_option(self::OPT_QUEUE);
             delete_option(self::OPT_POS);
             delete_option(self::OPT_TOTAL);
-            return ['ok' => true, 'message' => 'Sitemap already indexed. No new URLs found.'];
+            return [
+                'ok'      => true,
+                'message' => 'Sitemap already indexed. No new URLs found.',
+                'queued'  => 0,
+            ];
         }
 
         // (Re)queue and reset pointer
@@ -82,7 +94,11 @@ final class SturdyChat_SitemapIndexer
         if (function_exists('sturdychat_schedule_sitemap_worker')) {
             sturdychat_schedule_sitemap_worker();
         }
-        return ['ok' => true, 'message' => 'Queued ' . count($urls) . ' new URLs for background indexing.'];
+        return [
+            'ok'      => true,
+            'message' => 'Queued ' . count($urls) . ' new URLs for background indexing.',
+            'queued'  => count($urls),
+        ];
     }
 
     /**
@@ -175,6 +191,39 @@ final class SturdyChat_SitemapIndexer
             'ran'       => true,
             'processed' => $processed,
             'total'     => $total,
+            'remaining' => $remaining,
+        ];
+    }
+
+    /**
+     * Inspect the sitemap queue without mutating it.
+     *
+     * @return array{total:int,processed:int,remaining:int}
+     */
+    public static function getQueueSnapshot(): array
+    {
+        $queue = get_option(self::OPT_QUEUE, null);
+        if (!is_array($queue) || empty($queue)) {
+            return [
+                'total'     => 0,
+                'processed' => 0,
+                'remaining' => 0,
+            ];
+        }
+
+        $total = (int) get_option(self::OPT_TOTAL, 0);
+        if ($total <= 0) {
+            $total = count($queue);
+        }
+
+        $pos = (int) get_option(self::OPT_POS, 0);
+        $pos = max(0, min($pos, $total));
+
+        $remaining = max(0, $total - $pos);
+
+        return [
+            'total'     => $total,
+            'processed' => $pos,
             'remaining' => $remaining,
         ];
     }
