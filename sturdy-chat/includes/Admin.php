@@ -100,12 +100,11 @@ class SturdyChat_Admin
             'Retrieval index',
             function (): void {
                 $s = get_option('sturdychat_settings', []);
-                $v = $s['retrieval_index'] ?? 'wp'; // 'wp' | 'sitemap' | 'both'
+                $v = $s['retrieval_index'] ?? 'wp'; // 'wp' | 'sitemap'
                 ?>
                 <select name="sturdychat_settings[retrieval_index]">
                     <option value="wp" <?php selected($v, 'wp'); ?>>WP index only</option>
                     <option value="sitemap" <?php selected($v, 'sitemap'); ?>>Sitemap index only</option>
-                    <option value="both" <?php selected($v, 'both'); ?>>Both (merge &amp; rerank)</option>
                 </select>
                 <p class="description">Which index the retriever should query by default.</p>
                 <?php
@@ -153,7 +152,7 @@ class SturdyChat_Admin
 
         // New
         $out['sitemap_url']     = isset($in['sitemap_url']) ? esc_url_raw($in['sitemap_url']) : home_url('/sitemap_index.xml');
-        $out['retrieval_index'] = in_array(($in['retrieval_index'] ?? 'wp'), ['wp', 'sitemap', 'both'], true) ? $in['retrieval_index'] : 'wp';
+        $out['retrieval_index'] = in_array(($in['retrieval_index'] ?? 'wp'), ['wp', 'sitemap'], true) ? $in['retrieval_index'] : 'wp';
 
         return $out;
     }

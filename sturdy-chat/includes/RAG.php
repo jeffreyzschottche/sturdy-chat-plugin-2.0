@@ -116,36 +116,29 @@ class SturdyChat_RAG
         $cptHint  = self::inferCptHint($query);
         $dateHint = self::parseDutchDate($query);
 
-        // (2) Kies index (default: sitemap)
         // (2) Indexkeuze + CPT-routing
-        $tableChoice = $s['retrieval_index'] ?? 'sitemap'; // default sitemap
-        $cptHint  = self::inferCptHint($query);
-        $dateHint = self::parseDutchDate($query);
+        $tableChoice  = ($s['retrieval_index'] ?? 'wp') === 'sitemap' ? 'sitemap' : 'wp';
+        $primaryTable = $tableChoice === 'sitemap' ? STURDYCHAT_TABLE_SITEMAP : STURDYCHAT_TABLE;
 
         $candidates = [];
 
-        if (($tableChoice === 'sitemap' || $tableChoice === 'both') && $cptHint) {
+        if ($cptHint) {
             // HARD ROUTE: eerst alleen deze CPT ophalen
-            $candidates = self::lexicalCandidatesByCpt(STURDYCHAT_TABLE_SITEMAP, $cptHint, $query, 500);
-        }
-
-// Als CPT-route leeg of user wil beide: vul aan met standaard lexical (alle cpt's)
-        if (empty($candidates)) {
-            if ($tableChoice === 'wp' || $tableChoice === 'both') {
-                $candidates = array_merge($candidates, self::lexicalCandidatesFromTable(STURDYCHAT_TABLE, $query));
-            }
-            if ($tableChoice === 'sitemap' || $tableChoice === 'both') {
-                $candidates = array_merge($candidates, self::lexicalCandidatesFromTable(STURDYCHAT_TABLE_SITEMAP, $query));
-            }
+            $candidates = self::lexicalCandidatesByCpt($primaryTable, $cptHint, $query, 500);
         }
 
         if (!$candidates) {
-            // allerlaatste reddingsboei: grof op CPT en/of datum
-            if ($tableChoice === 'sitemap' || $tableChoice === 'both') {
-                $fallback = self::lexicalCandidatesByCpt(STURDYCHAT_TABLE_SITEMAP, $cptHint ?: 'nieuws', $query, 500);
+            $candidates = self::lexicalCandidatesFromTable($primaryTable, $query);
+        }
+
+        if (!$candidates && $tableChoice === 'sitemap') {
+            // allerlaatste reddingsboei: grof op CPT
+            $fallback = self::lexicalCandidatesByCpt($primaryTable, $cptHint ?: 'nieuws', $query, 500);
+            if ($fallback) {
                 $candidates = array_merge($candidates, $fallback);
             }
         }
+
         if (!$candidates) {
             return ['context' => '', 'sources' => []];
         }
@@ -322,14 +315,20 @@ class SturdyChat_RAG
 
         // Kolommen bepalen (veilig op schema-variaties)
         $cols = self::tableColumns($table);
-        $hasTitle = isset($cols['title']); $hasUrl = isset($cols['url']);
-        $hasCpt = isset($cols['cpt']); $hasPublishedAt = isset($cols['published_at']);
+        $isSitemap     = ($table === STURDYCHAT_TABLE_SITEMAP);
+        $source        = $isSitemap ? 'sitemap' : 'wp';
+        $hasTitle = isset($cols['title']);
+        $hasUrl = isset($cols['url']);
+        $hasCpt = isset($cols['cpt']);
+        $hasPublishedAt = isset($cols['published_at']);
+        $hasPostId = isset($cols['post_id']);
 
         if (!$hasCpt) return []; // zonder cpt-kolom kunnen we niet routeren
 
-        $selUrl   = $hasUrl ? "url" : "'' AS url";
-        $selTitle = $hasTitle ? "title" : "'' AS title";
-        $selPubAt = $hasPublishedAt ? "published_at" : "NULL AS published_at";
+        $selUrl    = $hasUrl ? "url" : "'' AS url";
+        $selTitle  = $hasTitle ? "title" : "'' AS title";
+        $selPubAt  = $hasPublishedAt ? "published_at" : "NULL AS published_at";
+        $selPostId = ($isSitemap || !$hasPostId) ? "0 AS post_id" : "post_id";
 
         // FULLTEXT detectie
         $ft = self::fulltextColumnsByIndex($table);
@@ -346,7 +345,7 @@ class SturdyChat_RAG
 
         if ($hasFTTitleContent && $useMatch) {
             $sql = $wpdb->prepare(
-                "SELECT id, 0 AS post_id, {$selUrl} AS url, {$selTitle} AS title, cpt, {$selPubAt} AS published_at,
+                "SELECT id, {$selPostId}, {$selUrl} AS url, {$selTitle} AS title, cpt, {$selPubAt} AS published_at,
                     chunk_index, content, embedding,
                     MATCH(title, content) AGAINST (%s IN NATURAL LANGUAGE MODE) AS bm_score
              FROM {$table}
@@ -357,7 +356,7 @@ class SturdyChat_RAG
             );
         } elseif ($hasFTContent && $useMatch) {
             $sql = $wpdb->prepare(
-                "SELECT id, 0 AS post_id, {$selUrl} AS url, {$selTitle} AS title, cpt, {$selPubAt} AS published_at,
+                "SELECT id, {$selPostId}, {$selUrl} AS url, {$selTitle} AS title, cpt, {$selPubAt} AS published_at,
                     chunk_index, content, embedding,
                     MATCH(content) AGAINST (%s IN NATURAL LANGUAGE MODE) AS bm_score
              FROM {$table}
@@ -371,7 +370,7 @@ class SturdyChat_RAG
             $like = '%' . $wpdb->esc_like($query) . '%';
             if ($useMatch && $hasTitle) {
                 $sql = $wpdb->prepare(
-                    "SELECT id, 0 AS post_id, {$selUrl} AS url, {$selTitle} AS title, cpt, {$selPubAt} AS published_at,
+                    "SELECT id, {$selPostId}, {$selUrl} AS url, {$selTitle} AS title, cpt, {$selPubAt} AS published_at,
                         chunk_index, content, embedding, 0 AS bm_score
                  FROM {$table}
                  WHERE cpt = %s AND (title LIKE %s OR content LIKE %s)
@@ -382,7 +381,7 @@ class SturdyChat_RAG
             } else {
                 // puur op cpt, laat vector de rest doen
                 $sql = $wpdb->prepare(
-                    "SELECT id, 0 AS post_id, {$selUrl} AS url, {$selTitle} AS title, cpt, {$selPubAt} AS published_at,
+                    "SELECT id, {$selPostId}, {$selUrl} AS url, {$selTitle} AS title, cpt, {$selPubAt} AS published_at,
                         chunk_index, content, embedding, 0 AS bm_score
                  FROM {$table}
                  WHERE cpt = %s
@@ -394,7 +393,7 @@ class SturdyChat_RAG
         }
 
         $rows = $wpdb->get_results($sql, ARRAY_A) ?: [];
-        foreach ($rows as &$r) { $r['_src'] = 'sitemap'; }
+        foreach ($rows as &$r) { $r['_src'] = $source; }
         unset($r);
         return $rows;
     }
@@ -404,6 +403,7 @@ class SturdyChat_RAG
         global $wpdb;
 
         $isSitemap = ($table === STURDYCHAT_TABLE_SITEMAP);
+        $source    = $isSitemap ? 'sitemap' : 'wp';
 
         // Bepaal kolommen die bestaan
         $cols = self::tableColumns($table);
@@ -411,12 +411,13 @@ class SturdyChat_RAG
         $hasUrl          = isset($cols['url']);
         $hasCpt          = isset($cols['cpt']);
         $hasPublishedAt  = isset($cols['published_at']);
+        $hasPostId       = isset($cols['post_id']);
 
         $selUrl    = $hasUrl   ? "url"                     : "'' AS url";
         $selTitle  = $hasTitle ? "title"                   : "'' AS title";
         $selCpt    = $hasCpt   ? "cpt"                     : "'' AS cpt";
         $selPubAt  = $hasPublishedAt ? "published_at"      : "NULL AS published_at";
-        $selPostId = $isSitemap ? "0 AS post_id"           : "post_id";
+        $selPostId = ($isSitemap || !$hasPostId) ? "0 AS post_id" : "post_id";
 
         // Detecteer FULLTEXT indexes
         $mode = 'LIKE'; // default fallback
@@ -524,7 +525,16 @@ class SturdyChat_RAG
         }
 
         $rows = $wpdb->get_results($sql, ARRAY_A);
-        return is_array($rows) ? $rows : [];
+        if (!is_array($rows)) {
+            return [];
+        }
+
+        foreach ($rows as &$r) {
+            $r['_src'] = $source;
+        }
+        unset($r);
+
+        return $rows;
     }
 
     /**
@@ -540,11 +550,13 @@ class SturdyChat_RAG
         $hasPublishedAt = isset($cols['published_at']);
         $hasTitle       = isset($cols['title']);
         $hasUrl         = isset($cols['url']);
+        $hasPostId      = isset($cols['post_id']);
 
         $selUrl    = $hasUrl   ? "url"                : "'' AS url";
         $selTitle  = $hasTitle ? "title"              : "'' AS title";
         $selCpt    = $hasCpt   ? "cpt"                : "'' AS cpt";
         $selPubAt  = $hasPublishedAt ? "published_at" : "NULL AS published_at";
+        $selPostId = ($isSitemap || !$hasPostId) ? "0 AS post_id" : "post_id";
 
         $where = [];
         $params = [];
@@ -563,7 +575,7 @@ class SturdyChat_RAG
         $sql = $wpdb->prepare(
             "SELECT
                 id,
-                0 AS post_id,
+                {$selPostId},
                 {$selUrl} AS url,
                 {$selTitle} AS title,
                 {$selCpt} AS cpt,
@@ -580,7 +592,16 @@ class SturdyChat_RAG
         );
 
         $rows = $wpdb->get_results($sql, ARRAY_A);
-        return is_array($rows) ? $rows : [];
+        if (!is_array($rows)) {
+            return [];
+        }
+
+        foreach ($rows as &$r) {
+            $r['_src'] = $source;
+        }
+        unset($r);
+
+        return $rows;
     }
 
     // ----------------------------
