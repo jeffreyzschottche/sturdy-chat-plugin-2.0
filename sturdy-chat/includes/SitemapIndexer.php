@@ -16,27 +16,45 @@ final class SturdyChat_SitemapIndexer
     private const LOCK_KEY  = 'sturdychat_sitemap_lock';
 
     /**
-     * Crawl the configured sitemap index and (re)index linked URLs into STURDYCHAT_TABLE_SITEMAP.
+     * Crawl the sitemap index immediately and report progress through the optional logger.
      *
-     * @param array $s Plugin settings.
-     * @return array{ok:bool,message:string}
+     * @param array         $s       Plugin settings.
+     * @param callable|null $logger  Optional function(string $message, string $type):void that receives log entries.
+     * @return array{ok:bool,message:string,stats?:array<string,int>}
      */
-    /**
-     * Admin entry: put URLs in a queue and schedule the worker.
-     * Safe to click multiple times — queue overwrites and de-dupes.
-     */
-    public static function indexAll(array $s): array
+    public static function indexAll(array $s, ?callable $logger = null): array
     {
-        $root = $s['sitemap_url'] ?? home_url('/sitemap_index.xml');
+        $log = static function (string $message, string $type = 'info') use ($logger): void {
+            if (!is_callable($logger)) {
+                return;
+            }
+            try {
+                $logger($message, $type);
+            } catch (\Throwable $e) {
+                // Swallow logging errors to avoid breaking the crawl.
+            }
+        };
 
+        $root = trim((string) ($s['sitemap_url'] ?? home_url('/sitemap_index.xml')));
+        if ($root === '') {
+            $log(__('Sitemap URL is leeg. Stel deze in bij de instellingen.', 'sturdychat-chatbot'), 'error');
+            return ['ok' => false, 'message' => __('Sitemap URL ontbreekt.', 'sturdychat-chatbot')];
+        }
+
+        $log(sprintf(__('Sitemap index ophalen: %s', 'sturdychat-chatbot'), $root));
         $childSitemaps = self::fetchSitemapIndex($root);
         if (empty($childSitemaps)) {
-            return ['ok' => false, 'message' => 'No child sitemaps parsed at ' . $root . '.'];
+            $log(__('Geen child sitemaps gevonden in de index.', 'sturdychat-chatbot'), 'error');
+            return ['ok' => false, 'message' => __('Geen child sitemaps gevonden.', 'sturdychat-chatbot')];
         }
+
+        $log(sprintf(_n('%d child sitemap gevonden.', '%d child sitemaps gevonden.', count($childSitemaps), 'sturdychat-chatbot'), count($childSitemaps)), 'info');
 
         $urls = [];
         foreach ($childSitemaps as $child) {
+            $log(sprintf(__('› %s laden…', 'sturdychat-chatbot'), $child), 'muted');
             $rows = self::fetchSitemapUrls($child);
+            $log(sprintf(_n('  %d URL gevonden.', '  %d URL\'s gevonden.', count($rows), 'sturdychat-chatbot'), count($rows)), 'muted');
             foreach ($rows as $r) {
                 $loc = trim((string) ($r['loc'] ?? ''));
                 if ($loc !== '') {
@@ -44,12 +62,15 @@ final class SturdyChat_SitemapIndexer
                 }
             }
         }
+
         $urls = array_values(array_unique($urls));
         if (empty($urls)) {
-            return ['ok' => false, 'message' => 'Child sitemaps had no URLs.'];
+            $log(__('De child sitemaps bevatten geen URL\'s.', 'sturdychat-chatbot'), 'error');
+            return ['ok' => false, 'message' => __('Sitemap bevat geen URL\'s.', 'sturdychat-chatbot')];
         }
 
-        // Skip URLs that are already indexed in the sitemap chunk table.
+        $log(sprintf(_n('Totaal %d unieke URL gevonden.', 'Totaal %d unieke URL\'s gevonden.', count($urls), 'sturdychat-chatbot'), count($urls)), 'info');
+
         global $wpdb;
         $table    = STURDYCHAT_TABLE_SITEMAP;
         $existing = [];
@@ -63,26 +84,88 @@ final class SturdyChat_SitemapIndexer
             }
         }
 
+        $existing = array_values(array_unique($existing));
         if (!empty($existing)) {
-            $urls = array_values(array_diff($urls, array_unique($existing)));
+            $log(sprintf(_n('%d URL staat al in de index.', '%d URL\'s staan al in de index.', count($existing), 'sturdychat-chatbot'), count($existing)), 'muted');
+        } else {
+            $log(__('Geen bestaande URL\'s gevonden in de index.', 'sturdychat-chatbot'), 'muted');
         }
 
-        if (empty($urls)) {
+        $toIndex = array_values(array_diff($urls, $existing));
+        if (empty($toIndex)) {
             delete_option(self::OPT_QUEUE);
             delete_option(self::OPT_POS);
             delete_option(self::OPT_TOTAL);
-            return ['ok' => true, 'message' => 'Sitemap already indexed. No new URLs found.'];
+            $log(__('Geen nieuwe URL\'s gevonden. Alles is up-to-date.', 'sturdychat-chatbot'), 'success');
+            return [
+                'ok'      => true,
+                'message' => __('Sitemap is al volledig geïndexeerd.', 'sturdychat-chatbot'),
+                'stats'   => [
+                    'total'    => count($urls),
+                    'existing' => count($existing),
+                    'indexed'  => 0,
+                    'skipped'  => 0,
+                    'errors'   => 0,
+                ],
+            ];
         }
 
-        // (Re)queue and reset pointer
-        update_option(self::OPT_QUEUE, $urls, false);
-        update_option(self::OPT_POS, 0, false);
-        update_option(self::OPT_TOTAL, count($urls), false);
+        $log(sprintf(_n('%d nieuwe URL wordt geïndexeerd.', '%d nieuwe URL\'s worden geïndexeerd.', count($toIndex), 'sturdychat-chatbot'), count($toIndex)), 'info');
 
-        if (function_exists('sturdychat_schedule_sitemap_worker')) {
-            sturdychat_schedule_sitemap_worker();
+        $indexed = 0;
+        $skipped = 0;
+        $errors  = 0;
+
+        foreach ($toIndex as $url) {
+            try {
+                $res = self::indexUrl((string) $url, null, $s);
+            } catch (\Throwable $e) {
+                error_log('[SturdyChat] sitemap index error ' . $url . ': ' . $e->getMessage());
+                $res = false;
+                $log(sprintf(__('⚠️ Fout bij indexeren van %s: %s', 'sturdychat-chatbot'), $url, $e->getMessage()), 'error');
+                $errors++;
+                continue;
+            }
+
+            if ($res === true) {
+                $indexed++;
+                $log(sprintf(__('✔️ Geïndexeerd: %s', 'sturdychat-chatbot'), $url), 'success');
+            } elseif ($res === null) {
+                $skipped++;
+                $log(sprintf(__('⏭️ Ongewijzigd of lege inhoud: %s', 'sturdychat-chatbot'), $url), 'muted');
+            } else {
+                $errors++;
+                $log(sprintf(__('⚠️ Mislukt: %s', 'sturdychat-chatbot'), $url), 'error');
+            }
         }
-        return ['ok' => true, 'message' => 'Queued ' . count($urls) . ' new URLs for background indexing.'];
+
+        delete_option(self::OPT_QUEUE);
+        delete_option(self::OPT_POS);
+        delete_option(self::OPT_TOTAL);
+
+        if ($indexed > 0 || $skipped > 0) {
+            update_option('sturdychat_sitemap_last_done', current_time('mysql'), false);
+        }
+
+        $summary = sprintf(
+            __('Indexeren klaar: %1$d nieuw, %2$d overgeslagen, %3$d fouten.', 'sturdychat-chatbot'),
+            $indexed,
+            $skipped,
+            $errors
+        );
+        $log($summary, $errors === 0 ? 'success' : 'error');
+
+        return [
+            'ok'      => ($errors === 0),
+            'message' => $summary,
+            'stats'   => [
+                'total'    => count($urls),
+                'existing' => count($existing),
+                'indexed'  => $indexed,
+                'skipped'  => $skipped,
+                'errors'   => $errors,
+            ],
+        ];
     }
 
     /**
