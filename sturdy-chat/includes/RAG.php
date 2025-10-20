@@ -531,7 +531,16 @@ class SturdyChat_RAG
         }
 
         $rows = $wpdb->get_results($sql, ARRAY_A);
-        return is_array($rows) ? $rows : [];
+        if (!is_array($rows)) {
+            return [];
+        }
+
+        foreach ($rows as &$row) {
+            $row['_src'] = $isSitemap ? 'sitemap' : 'wp';
+        }
+        unset($row);
+
+        return $rows;
     }
 
     /**
@@ -587,7 +596,16 @@ class SturdyChat_RAG
         );
 
         $rows = $wpdb->get_results($sql, ARRAY_A);
-        return is_array($rows) ? $rows : [];
+        if (!is_array($rows)) {
+            return [];
+        }
+
+        foreach ($rows as &$row) {
+            $row['_src'] = ($table === STURDYCHAT_TABLE_SITEMAP) ? 'sitemap' : 'wp';
+        }
+        unset($row);
+
+        return $rows;
     }
 
     // ----------------------------
