@@ -116,11 +116,8 @@ class SturdyChat_RAG
         $cptHint  = self::inferCptHint($query);
         $dateHint = self::parseDutchDate($query);
 
-        // (2) Kies index (default: sitemap)
         // (2) Indexkeuze + CPT-routing
         $tableChoice = $s['retrieval_index'] ?? 'sitemap'; // default sitemap
-        $cptHint  = self::inferCptHint($query);
-        $dateHint = self::parseDutchDate($query);
 
         $candidates = [];
 
@@ -129,7 +126,7 @@ class SturdyChat_RAG
             $candidates = self::lexicalCandidatesByCpt(STURDYCHAT_TABLE_SITEMAP, $cptHint, $query, 500);
         }
 
-// Als CPT-route leeg of user wil beide: vul aan met standaard lexical (alle cpt's)
+        // Als CPT-route leeg of user wil beide: vul aan met standaard lexical (alle cpt's)
         if (empty($candidates)) {
             if ($tableChoice === 'wp' || $tableChoice === 'both') {
                 $candidates = array_merge($candidates, self::lexicalCandidatesFromTable(STURDYCHAT_TABLE, $query));
@@ -235,8 +232,15 @@ class SturdyChat_RAG
 
 // Cosine-drempel — CPT of hub mag drempel negeren
         $cosMin = isset($s['cosine_min']) ? (float)$s['cosine_min'] : 0.18;
-        $filtered = array_values(array_filter($filtered, static function (array $r) use ($cosMin): bool {
-            if (!empty($r['_cpt_match']) || !empty($r['_hub'])) return true;
+        $bmMin  = 0.08;
+        $filtered = array_values(array_filter($filtered, static function (array $r) use ($cosMin, $bmMin): bool {
+            if (!empty($r['_cpt_match']) || !empty($r['_hub'])) {
+                return true;
+            }
+            $bm = (float) ($r['bm25'] ?? 0.0);
+            if ($bm >= $bmMin) {
+                return true;
+            }
             return (($r['cos'] ?? 0.0) >= $cosMin);
         }));
 
@@ -401,7 +405,9 @@ class SturdyChat_RAG
         }
 
         $rows = $wpdb->get_results($sql, ARRAY_A) ?: [];
-        foreach ($rows as &$r) { $r['_src'] = 'sitemap'; }
+        foreach ($rows as &$r) {
+            $r['_src'] = ($table === STURDYCHAT_TABLE_SITEMAP) ? 'sitemap' : 'wp';
+        }
         unset($r);
         return $rows;
     }
