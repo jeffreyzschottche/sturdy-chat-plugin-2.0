@@ -86,6 +86,67 @@ final class SturdyChat_SitemapIndexer
     }
 
     /**
+     * Drain the sitemap queue synchronously by repeatedly running workBatch().
+     *
+     * @param int $batchSize Number of URLs to process per batch.
+     * @return array{ran:bool,processed:int,total:int,remaining:int}
+     */
+    public static function drainQueueSynchronously(int $batchSize = 25): array
+    {
+        $queue = get_option(self::OPT_QUEUE, null);
+        if (!is_array($queue) || empty($queue)) {
+            return [
+                'ran'       => false,
+                'processed' => 0,
+                'total'     => 0,
+                'remaining' => 0,
+            ];
+        }
+
+        $total = (int) get_option(self::OPT_TOTAL, 0);
+        if ($total <= 0) {
+            $total = count($queue);
+            update_option(self::OPT_TOTAL, $total, false);
+        }
+
+        $processed = max(0, min((int) get_option(self::OPT_POS, 0), $total));
+        $remaining = max(0, $total - $processed);
+
+        $batchSize  = max(1, (int) $batchSize);
+        $iterations = 0;
+
+        while ($remaining > 0 && $iterations < 500) {
+            $beforePos = (int) get_option(self::OPT_POS, 0);
+            self::workBatch($batchSize);
+            $iterations++;
+
+            $queue = get_option(self::OPT_QUEUE, null);
+            if (!is_array($queue) || empty($queue)) {
+                $processed = $total;
+                $remaining = 0;
+                break;
+            }
+
+            $pos = (int) get_option(self::OPT_POS, 0);
+            if ($pos <= $beforePos) {
+                $processed = max(0, min($pos, $total));
+                $remaining = max(0, $total - $processed);
+                break;
+            }
+
+            $processed = max(0, min($pos, $total));
+            $remaining = max(0, $total - $processed);
+        }
+
+        return [
+            'ran'       => true,
+            'processed' => $processed,
+            'total'     => $total,
+            'remaining' => $remaining,
+        ];
+    }
+
+    /**
      * Cron worker: process a small batch each run. Automatically re-schedules until done.
      */
     /**

@@ -373,6 +373,36 @@ class SturdyChat_Admin
         $s   = get_option('sturdychat_settings', []);
         $res = SturdyChat_SitemapIndexer::indexAll($s);
 
+        if ($res['ok']) {
+            // Drain the queue immediately so the admin sees the final state, even if WP-Cron is disabled.
+            $cronScheduled = (bool) wp_next_scheduled('sturdychat_sitemap_worker');
+            $drain         = SturdyChat_SitemapIndexer::drainQueueSynchronously($cronScheduled ? 25 : 50);
+
+            if ($drain['ran']) {
+                if ($drain['remaining'] === 0) {
+                    if ($drain['processed'] > 0) {
+                        $res['message'] = sprintf(
+                            _n(
+                                'Indexed %d new URL from the sitemap immediately.',
+                                'Indexed %d new URLs from the sitemap immediately.',
+                                $drain['processed'],
+                                'sturdychat-chatbot'
+                            ),
+                            $drain['processed']
+                        );
+                    } else {
+                        $res['message'] = __('Sitemap already indexed. 0 new URLs to process.', 'sturdychat-chatbot');
+                    }
+                } else {
+                    $res['message'] = sprintf(
+                        __('Indexed %1$d URLs immediately; %2$d remaining in background queue.', 'sturdychat-chatbot'),
+                        $drain['processed'],
+                        $drain['remaining']
+                    );
+                }
+            }
+        }
+
         $msg = $res['ok'] ? $res['message'] : ('Failed: ' . $res['message']);
         wp_safe_redirect(add_query_arg(
             ['page' => 'sturdychat', 'msg' => rawurlencode($msg)],
