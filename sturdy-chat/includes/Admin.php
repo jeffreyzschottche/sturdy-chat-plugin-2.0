@@ -8,7 +8,7 @@ if (!defined('ABSPATH')) {
 /**
  * Admin UI and settings for Sturdy Chat.
  *
- * - Registers the main admin menu and an "Index Sitemap" submenu.
+ * - Registers the main admin menu.
  * - Registers settings and renders the settings page.
  * - Handles the "Index Sitemap" action (admin-post endpoint).
  */
@@ -33,15 +33,6 @@ class SturdyChat_Admin
             [__CLASS__, 'renderSettingsPage'],
             'dashicons-format-chat',
             58
-        );
-
-        add_submenu_page(
-            'sturdychat',
-            'Index Sitemap',
-            'Index Sitemap',
-            'manage_options',
-            'sturdychat-index-sitemap',
-            [__CLASS__, 'renderIndexSitemap']
         );
     }
 
@@ -343,7 +334,20 @@ class SturdyChat_Admin
             return;
         }
 
+        $indexUrl = wp_nonce_url(admin_url('admin-post.php?action=sturdychat_index_sitemap'), 'sturdychat_index_sitemap');
+
         echo '<div class="wrap"><h1>Sturdy Chat (Self-Hosted RAG)</h1>';
+
+        if (!empty($_GET['msg'])) {
+            echo '<div class="notice notice-info"><p>' . esc_html(wp_unslash((string) $_GET['msg'])) . '</p></div>';
+        }
+
+        echo '<div class="card" style="max-width:600px;margin-bottom:20px;">';
+        echo '<h2>' . esc_html__('Index sitemap', 'sturdychat-chatbot') . '</h2>';
+        echo '<p>' . esc_html__('Crawl the configured sitemap and refresh the vector index used for retrieval.', 'sturdychat-chatbot') . '</p>';
+        echo '<p><a class="button button-primary" href="' . esc_url($indexUrl) . '">' . esc_html__('Start indexing', 'sturdychat-chatbot') . '</a></p>';
+        echo '</div>';
+
         echo '<form method="post" action="options.php">';
         settings_fields('sturdychat_settings_group');
         do_settings_sections('sturdychat');
@@ -351,26 +355,6 @@ class SturdyChat_Admin
         echo '</form>';
 
         echo '</div>';
-    }
-
-    /**
-     * Renders the "Index Sitemap" admin page with a button that triggers the admin-post endpoint.
-     *
-     * @return void
-     */
-    public static function renderIndexSitemap(): void
-    {
-        $url = wp_nonce_url(admin_url('admin-post.php?action=sturdychat_index_sitemap'), 'sturdychat_index_sitemap');
-        ?>
-        <div class="wrap">
-            <h1>Index Sitemap</h1>
-            <p>This will crawl the configured sitemap and build/update the second vector index.</p>
-            <p><a class="button button-primary" href="<?php echo esc_url($url); ?>">Start indexing</a></p>
-            <?php if (!empty($_GET['msg'])) : ?>
-                <div class="notice notice-info"><p><?php echo esc_html(wp_unslash((string) $_GET['msg'])); ?></p></div>
-            <?php endif; ?>
-        </div>
-        <?php
     }
 
     /**
@@ -391,7 +375,7 @@ class SturdyChat_Admin
 
         $msg = $res['ok'] ? $res['message'] : ('Failed: ' . $res['message']);
         wp_safe_redirect(add_query_arg(
-            ['page' => 'sturdychat-index-sitemap', 'msg' => rawurlencode($msg)],
+            ['page' => 'sturdychat', 'msg' => rawurlencode($msg)],
             admin_url('admin.php')
         ));
         exit;
