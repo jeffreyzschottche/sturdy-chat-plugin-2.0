@@ -231,12 +231,19 @@ class SturdyChat_RAG
         }
         unset($row);
 
+        $scored = $filtered; // bewaar scoringsresultaat voor fallback-scenario
+
 // Cosine-drempel — CPT of hub mag drempel negeren
         $cosMin = isset($s['cosine_min']) ? (float)$s['cosine_min'] : 0.18;
         $filtered = array_values(array_filter($filtered, static function (array $r) use ($cosMin): bool {
             if (!empty($r['_cpt_match']) || !empty($r['_hub'])) return true;
             return (($r['cos'] ?? 0.0) >= $cosMin);
         }));
+
+        if (!$filtered && $scored) {
+            // Cosine drempel was te streng; neem beste kandidaten op basis van eindscore.
+            $filtered = $scored;
+        }
 
         usort($filtered, static fn(array $a, array $b): int => ($a['final'] < $b['final']) ? 1 : -1);
 
