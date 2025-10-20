@@ -49,6 +49,31 @@ final class SturdyChat_SitemapIndexer
             return ['ok' => false, 'message' => 'Child sitemaps had no URLs.'];
         }
 
+        // Skip URLs that are already indexed in the sitemap chunk table.
+        global $wpdb;
+        $table    = STURDYCHAT_TABLE_SITEMAP;
+        $existing = [];
+
+        foreach (array_chunk($urls, 500) as $chunk) {
+            $placeholders = implode(', ', array_fill(0, count($chunk), '%s'));
+            $sql          = "SELECT DISTINCT url FROM {$table} WHERE url IN ($placeholders)";
+            $found        = $wpdb->get_col($wpdb->prepare($sql, $chunk));
+            if (!empty($found)) {
+                $existing = array_merge($existing, $found);
+            }
+        }
+
+        if (!empty($existing)) {
+            $urls = array_values(array_diff($urls, array_unique($existing)));
+        }
+
+        if (empty($urls)) {
+            delete_option(self::OPT_QUEUE);
+            delete_option(self::OPT_POS);
+            delete_option(self::OPT_TOTAL);
+            return ['ok' => true, 'message' => 'Sitemap already indexed. No new URLs found.'];
+        }
+
         // (Re)queue and reset pointer
         update_option(self::OPT_QUEUE, $urls, false);
         update_option(self::OPT_POS, 0, false);
@@ -57,8 +82,7 @@ final class SturdyChat_SitemapIndexer
         if (function_exists('sturdychat_schedule_sitemap_worker')) {
             sturdychat_schedule_sitemap_worker();
         }
-
-        return ['ok' => true, 'message' => 'Queued ' . count($urls) . ' URLs for background indexing.'];
+        return ['ok' => true, 'message' => 'Queued ' . count($urls) . ' new URLs for background indexing.'];
     }
 
     /**
