@@ -56,7 +56,7 @@ final class SturdyChat_SitemapIndexer
      * Collect URLs from the configured sitemap that are not yet stored in the sitemap chunk table.
      *
      * @param array $s Plugin settings.
-     * @return array{ok:bool,message:string,urls:array}
+     * @return array{ok:bool,message:string,urls:array,skipped:int}
      */
     public static function findUnindexedUrls(array $s): array
     {
@@ -64,7 +64,7 @@ final class SturdyChat_SitemapIndexer
 
         $childSitemaps = self::fetchSitemapIndex($root);
         if (empty($childSitemaps)) {
-            return ['ok' => false, 'message' => 'No child sitemaps parsed at ' . $root . '.', 'urls' => []];
+            return ['ok' => false, 'message' => 'No child sitemaps parsed at ' . $root . '.', 'urls' => [], 'skipped' => 0];
         }
 
         $urls = [];
@@ -79,7 +79,7 @@ final class SturdyChat_SitemapIndexer
         }
         $urls = array_values(array_unique($urls));
         if (empty($urls)) {
-            return ['ok' => false, 'message' => 'Child sitemaps had no URLs.', 'urls' => []];
+            return ['ok' => false, 'message' => 'Child sitemaps had no URLs.', 'urls' => [], 'skipped' => 0];
         }
 
         // Skip URLs that are already indexed in the sitemap chunk table.
@@ -100,11 +100,39 @@ final class SturdyChat_SitemapIndexer
             $urls = array_values(array_diff($urls, array_unique($existing)));
         }
 
-        if (empty($urls)) {
-            return ['ok' => true, 'message' => 'Sitemap already indexed. No new URLs found.', 'urls' => []];
+        $skipListRaw = (array) get_option('sturdychat_skipped_sitemap_urls', []);
+        $skipList    = [];
+        foreach ($skipListRaw as $skipUrl) {
+            $clean = esc_url_raw((string) $skipUrl);
+            if ($clean !== '') {
+                $skipList[] = $clean;
+            }
+        }
+        $skipList     = array_values(array_unique($skipList));
+        $skippedCount = 0;
+
+        if (!empty($skipList)) {
+            $skippedCount = count(array_intersect($urls, $skipList));
+            if ($skippedCount > 0) {
+                $urls = array_values(array_diff($urls, $skipList));
+            }
         }
 
-        return ['ok' => true, 'message' => 'Found ' . count($urls) . ' unindexed URLs.', 'urls' => $urls];
+        if (empty($urls)) {
+            $message = 'Sitemap already indexed. No new URLs found.';
+            if ($skippedCount > 0) {
+                $message .= ' ' . $skippedCount . ' URLs are currently ignored.';
+            }
+
+            return ['ok' => true, 'message' => $message, 'urls' => [], 'skipped' => $skippedCount];
+        }
+
+        $message = 'Found ' . count($urls) . ' unindexed URLs.';
+        if ($skippedCount > 0) {
+            $message .= ' ' . $skippedCount . ' URLs are currently ignored.';
+        }
+
+        return ['ok' => true, 'message' => $message, 'urls' => $urls, 'skipped' => $skippedCount];
     }
 
     /**
