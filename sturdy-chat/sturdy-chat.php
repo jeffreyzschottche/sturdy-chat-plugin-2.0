@@ -135,6 +135,7 @@ add_action('plugins_loaded', function () {
         add_action('admin_menu', ['SturdyChat_Admin', 'registerMenu']);
         add_action('admin_init', ['SturdyChat_Admin', 'registerSettings'], 20);
         add_action('admin_post_sturdychat_index_sitemap', ['SturdyChat_Admin', 'handleIndexSitemap']);
+        add_action('admin_post_sturdychat_list_unindexed', ['SturdyChat_Admin', 'handleListUnindexed']);
 
     }
     if (class_exists('SturdyChat_REST')) {

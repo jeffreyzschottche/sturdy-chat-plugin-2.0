@@ -27,11 +27,44 @@ final class SturdyChat_SitemapIndexer
      */
     public static function indexAll(array $s): array
     {
+        $list = self::findUnindexedUrls($s);
+        if (!$list['ok']) {
+            return ['ok' => false, 'message' => $list['message']];
+        }
+
+        $urls = $list['urls'];
+
+        if (empty($urls)) {
+            delete_option(self::OPT_QUEUE);
+            delete_option(self::OPT_POS);
+            delete_option(self::OPT_TOTAL);
+            return ['ok' => true, 'message' => 'Sitemap already indexed. No new URLs found.'];
+        }
+
+        // (Re)queue and reset pointer
+        update_option(self::OPT_QUEUE, $urls, false);
+        update_option(self::OPT_POS, 0, false);
+        update_option(self::OPT_TOTAL, count($urls), false);
+
+        if (function_exists('sturdychat_schedule_sitemap_worker')) {
+            sturdychat_schedule_sitemap_worker();
+        }
+        return ['ok' => true, 'message' => 'Queued ' . count($urls) . ' new URLs for background indexing.'];
+    }
+
+    /**
+     * Collect URLs from the configured sitemap that are not yet stored in the sitemap chunk table.
+     *
+     * @param array $s Plugin settings.
+     * @return array{ok:bool,message:string,urls:array}
+     */
+    public static function findUnindexedUrls(array $s): array
+    {
         $root = $s['sitemap_url'] ?? home_url('/sitemap_index.xml');
 
         $childSitemaps = self::fetchSitemapIndex($root);
         if (empty($childSitemaps)) {
-            return ['ok' => false, 'message' => 'No child sitemaps parsed at ' . $root . '.'];
+            return ['ok' => false, 'message' => 'No child sitemaps parsed at ' . $root . '.', 'urls' => []];
         }
 
         $urls = [];
@@ -46,7 +79,7 @@ final class SturdyChat_SitemapIndexer
         }
         $urls = array_values(array_unique($urls));
         if (empty($urls)) {
-            return ['ok' => false, 'message' => 'Child sitemaps had no URLs.'];
+            return ['ok' => false, 'message' => 'Child sitemaps had no URLs.', 'urls' => []];
         }
 
         // Skip URLs that are already indexed in the sitemap chunk table.
@@ -68,21 +101,10 @@ final class SturdyChat_SitemapIndexer
         }
 
         if (empty($urls)) {
-            delete_option(self::OPT_QUEUE);
-            delete_option(self::OPT_POS);
-            delete_option(self::OPT_TOTAL);
-            return ['ok' => true, 'message' => 'Sitemap already indexed. No new URLs found.'];
+            return ['ok' => true, 'message' => 'Sitemap already indexed. No new URLs found.', 'urls' => []];
         }
 
-        // (Re)queue and reset pointer
-        update_option(self::OPT_QUEUE, $urls, false);
-        update_option(self::OPT_POS, 0, false);
-        update_option(self::OPT_TOTAL, count($urls), false);
-
-        if (function_exists('sturdychat_schedule_sitemap_worker')) {
-            sturdychat_schedule_sitemap_worker();
-        }
-        return ['ok' => true, 'message' => 'Queued ' . count($urls) . ' new URLs for background indexing.'];
+        return ['ok' => true, 'message' => 'Found ' . count($urls) . ' unindexed URLs.', 'urls' => $urls];
     }
 
     /**

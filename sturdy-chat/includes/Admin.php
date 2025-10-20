@@ -334,7 +334,11 @@ class SturdyChat_Admin
             return;
         }
 
-        $indexUrl = wp_nonce_url(admin_url('admin-post.php?action=sturdychat_index_sitemap'), 'sturdychat_index_sitemap');
+        $indexUrl  = wp_nonce_url(admin_url('admin-post.php?action=sturdychat_index_sitemap'), 'sturdychat_index_sitemap');
+        $searchUrl = wp_nonce_url(admin_url('admin-post.php?action=sturdychat_list_unindexed'), 'sturdychat_list_unindexed');
+
+        $unindexedUrls     = (array) get_option('sturdychat_unindexed_urls', []);
+        $unindexedMessage  = (string) get_option('sturdychat_unindexed_message', '');
 
         echo '<div class="wrap"><h1>Sturdy Chat (Self-Hosted RAG)</h1>';
 
@@ -345,7 +349,20 @@ class SturdyChat_Admin
         echo '<div class="card" style="max-width:600px;margin-bottom:20px;">';
         echo '<h2>' . esc_html__('Index sitemap', 'sturdychat-chatbot') . '</h2>';
         echo '<p>' . esc_html__('Crawl the configured sitemap and refresh the vector index used for retrieval.', 'sturdychat-chatbot') . '</p>';
-        echo '<p><a class="button button-primary" href="' . esc_url($indexUrl) . '">' . esc_html__('Start indexing', 'sturdychat-chatbot') . '</a></p>';
+        echo '<p>';
+        echo '<a class="button" style="margin-right:8px;" href="' . esc_url($searchUrl) . '">' . esc_html__('Search unindexed sitemap', 'sturdychat-chatbot') . '</a>';
+        echo '<a class="button button-primary" href="' . esc_url($indexUrl) . '">' . esc_html__('Index / vector embed', 'sturdychat-chatbot') . '</a>';
+        echo '</p>';
+
+        if ($unindexedMessage !== '') {
+            echo '<p><em>' . esc_html($unindexedMessage) . '</em></p>';
+        }
+
+        if (!empty($unindexedUrls)) {
+            $joined = implode("\n", array_map('esc_url_raw', $unindexedUrls));
+            echo '<p><textarea rows="10" class="large-text code" readonly>' . esc_textarea($joined) . '</textarea></p>';
+        }
+
         echo '</div>';
 
         echo '<form method="post" action="options.php">';
@@ -370,10 +387,44 @@ class SturdyChat_Admin
 
         check_admin_referer('sturdychat_index_sitemap');
 
+        delete_option('sturdychat_unindexed_urls');
+        delete_option('sturdychat_unindexed_message');
+
         $s   = get_option('sturdychat_settings', []);
         $res = SturdyChat_SitemapIndexer::indexAll($s);
 
         $msg = $res['ok'] ? $res['message'] : ('Failed: ' . $res['message']);
+        wp_safe_redirect(add_query_arg(
+            ['page' => 'sturdychat', 'msg' => rawurlencode($msg)],
+            admin_url('admin.php')
+        ));
+        exit;
+    }
+
+    /**
+     * Handles the admin-post action for listing unindexed sitemap URLs.
+     */
+    public static function handleListUnindexed(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('Forbidden');
+        }
+
+        check_admin_referer('sturdychat_list_unindexed');
+
+        $s   = get_option('sturdychat_settings', []);
+        $res = SturdyChat_SitemapIndexer::findUnindexedUrls($s);
+
+        if ($res['ok'] && !empty($res['urls'])) {
+            update_option('sturdychat_unindexed_urls', array_values($res['urls']), false);
+        } else {
+            delete_option('sturdychat_unindexed_urls');
+        }
+
+        update_option('sturdychat_unindexed_message', $res['message'] ?? '', false);
+
+        $msg = $res['message'] ?? '';
+
         wp_safe_redirect(add_query_arg(
             ['page' => 'sturdychat', 'msg' => rawurlencode($msg)],
             admin_url('admin.php')
