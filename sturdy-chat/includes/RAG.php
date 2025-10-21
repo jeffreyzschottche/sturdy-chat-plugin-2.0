@@ -27,10 +27,11 @@ class SturdyChat_RAG
      */
     public static function answer(string $question, array $s, array $hints = [], ?string $traceId = null): array
     {
-        $topK = (int) ($s['top_k'] ?? 6);
-        $temp = (float) ($s['temperature'] ?? 0.2);
+        $settings = sturdychat_settings_with_defaults($s);
+        $topK = (int) $settings['top_k'];
+        $temp = (float) $settings['temperature'];
 
-        $retr = self::retrieve($question, $s, $topK, $hints, $traceId);
+        $retr = self::retrieve($question, $settings, $topK, $hints, $traceId);
         $ctx  = trim((string) ($retr['context'] ?? ''));
 
         if ($ctx === '') {
@@ -41,9 +42,9 @@ class SturdyChat_RAG
             ];
         }
 
-        $base  = rtrim((string) ($s['openai_api_base'] ?? 'https://api.openai.com/v1'), '/');
-        $key   = trim((string) ($s['openai_api_key'] ?? ''));
-        $model = (string) ($s['chat_model'] ?? 'gpt-4o-mini');
+        $base  = rtrim((string) $settings['openai_api_base'], '/');
+        $key   = trim((string) $settings['openai_api_key']);
+        $model = (string) $settings['chat_model'];
 
         if ($key === '') {
             return ['ok' => false, 'message' => 'OpenAI API Key ontbreekt. Stel deze in.'];
@@ -108,6 +109,8 @@ class SturdyChat_RAG
         ?string $traceId = null
     ): array {
         global $wpdb;
+
+        $settings = sturdychat_settings_with_defaults($s);
 
         // (1) Constraints & hints
         $cons        = self::buildConstraints($query);
@@ -194,7 +197,7 @@ class SturdyChat_RAG
 
 
         // (4) Vector re-ranking + boosts
-        $qvec = SturdyChat_Embedder::embed($query, $s);
+        $qvec = SturdyChat_Embedder::embed($query, $settings);
         foreach ($filtered as &$row) {
             $e = json_decode((string) ($row['embedding'] ?? '[]'), true);
             $row['cos'] = ($e && is_array($e)) ? SturdyChat_Embedder::cosine($qvec, $e) : 0.0;
@@ -227,7 +230,7 @@ class SturdyChat_RAG
         unset($row);
 
 // Cosine-drempel — CPT of hub mag drempel negeren
-        $cosMin = isset($s['cosine_min']) ? (float)$s['cosine_min'] : 0.18;
+        $cosMin = isset($settings['cosine_min']) ? (float)$settings['cosine_min'] : 0.18;
         $filtered = array_values(array_filter($filtered, static function (array $r) use ($cosMin): bool {
             if (!empty($r['_cpt_match']) || !empty($r['_hub'])) return true;
             return (($r['cos'] ?? 0.0) >= $cosMin);

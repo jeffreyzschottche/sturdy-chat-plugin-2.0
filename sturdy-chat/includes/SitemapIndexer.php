@@ -107,7 +107,7 @@ final class SturdyChat_SitemapIndexer
         }
 
         try {
-            $settings = get_option('sturdychat_settings', []);
+            $settings = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
             $queue    = (array) get_option(self::OPT_QUEUE, []);
             $total    = (int) get_option(self::OPT_TOTAL, 0);
             $pos      = (int) get_option(self::OPT_POS, 0);

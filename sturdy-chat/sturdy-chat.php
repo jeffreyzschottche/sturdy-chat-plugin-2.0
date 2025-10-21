@@ -85,6 +85,40 @@ function sturdychat_all_public_types(): array
     return array_values($names);
 }
 
+/**
+ * Returns the default settings for the plugin.
+ */
+function sturdychat_default_settings(): array
+{
+    return [
+        'provider' => 'openai',
+        'openai_api_base' => 'https://api.openai.com/v1',
+        'openai_api_key' => '',
+        'embed_model' => 'text-embedding-3-small',
+        'chat_model' => 'gpt-4o-mini',
+        'top_k' => 6,
+        'temperature' => 0.2,
+        'index_post_types' => sturdychat_all_public_types(),
+        'include_taxonomies' => 1,
+        'include_meta' => 0,
+        'meta_keys' => '',
+        'batch_size' => 25,
+        'chunk_chars' => 1200,
+        'chat_title' => 'Stel je vraag',
+        'sitemap_url' => home_url('/sitemap_index.xml'),
+    ];
+}
+
+/**
+ * Ensures the provided settings array always contains defaults.
+ */
+function sturdychat_settings_with_defaults(?array $settings = null): array
+{
+    $current = is_array($settings) ? $settings : [];
+
+    return array_merge(sturdychat_default_settings(), $current);
+}
+
 if (class_exists('SturdyChat_CPTs')) {
     SturdyChat_CPTs::init();
 }
@@ -92,22 +126,7 @@ if (class_exists('SturdyChat_CPTs')) {
 /** Activate */
 register_activation_hook(__FILE__, function () {
     if (!get_option('sturdychat_settings')) {
-        add_option('sturdychat_settings', [
-            'provider' => 'openai',
-            'openai_api_base' => 'https://api.openai.com/v1',
-            'openai_api_key' => '',
-            'embed_model' => 'text-embedding-3-small',
-            'chat_model' => 'gpt-4o-mini',
-            'top_k' => 6,
-            'temperature' => 0.2,
-            'index_post_types' => sturdychat_all_public_types(),
-            'include_taxonomies' => 1,
-            'include_meta' => 0,
-            'meta_keys' => '',
-            'batch_size' => 25,
-            'chunk_chars' => 1200,
-            'chat_title' => 'Stel je vraag',
-        ]);
+        add_option('sturdychat_settings', sturdychat_default_settings());
     }
     if (class_exists('SturdyChat_Install')) {
         SturdyChat_Install::ensureDb();
@@ -145,9 +164,9 @@ add_action('plugins_loaded', function () {
      * Shortcode [sturdy-chat]
      */
     add_shortcode('sturdy-chat', function ($atts = []) {
-        $s = get_option('sturdychat_settings', []);
+        $s = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
         $atts = shortcode_atts([
-            'title' => $s['chat_title'] ?? 'Stel je vraag',
+            'title' => $s['chat_title'],
             'placeholder' => '',
             'button' => '',
         ], $atts, 'sturdy-chat');

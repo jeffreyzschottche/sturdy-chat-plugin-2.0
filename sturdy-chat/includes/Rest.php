@@ -43,7 +43,7 @@ class SturdyChat_REST
      */
     public static function handleAsk(WP_REST_Request $req): WP_REST_Response
     {
-        $s = get_option('sturdychat_settings', []);
+        $s = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
 
         // Get Query from ?q or JSON body {question:"..."}
         $q = $req->get_param('q');
