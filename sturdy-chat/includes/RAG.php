@@ -116,8 +116,10 @@ class SturdyChat_RAG
         $mustPhrases = $cons['must_phrases'];
         $antiTerms   = $cons['anti_terms'];
 
-        $cptHint  = self::inferCptHint($query);
-        $dateHint = self::parseDutchDate($query);
+        $cptHint    = self::inferCptHint($query);
+        $dateHint   = self::parseDutchDate($query);
+        $todayIso   = function_exists('wp_date') ? wp_date('Y-m-d') : date_i18n('Y-m-d');
+        $dateIntent = self::detectDateIntent($query, $todayIso);
 
         // (2) Indexkeuze + CPT-routing (enkel sitemap)
         $primaryTable = STURDYCHAT_TABLE_SITEMAP;
@@ -138,6 +140,22 @@ class SturdyChat_RAG
             $fallback = self::lexicalCandidatesByCpt($primaryTable, $cptHint ?: 'nieuws', $query, 500);
             if ($fallback) {
                 $candidates = array_merge($candidates, $fallback);
+            }
+        }
+
+        if (
+            !$candidates
+            && (
+                !empty($dateHint['iso'])
+                || !empty($dateIntent['target_iso'])
+                || !empty($dateIntent['target_range'])
+                || !empty($dateIntent['want_latest'])
+                || !empty($dateIntent['want_oldest'])
+            )
+        ) {
+            $byDate = self::lexicalCandidatesByCptDate($primaryTable, $cptHint, $dateHint, $dateIntent, 400);
+            if ($byDate) {
+                $candidates = array_merge($candidates, $byDate);
             }
         }
 
@@ -212,15 +230,7 @@ class SturdyChat_RAG
             if (!empty($row['_hub']))       $boost += 0.45;
 
             // Datum-boost
-            if (!empty($dateHint['iso']) || !empty($dateHint['text'])) {
-                $hitDate  = false;
-                $contentL = mb_strtolower((string)$row['content']);
-                $urlL     = mb_strtolower((string)($row['url'] ?? ''));
-                $pubAt    = (string)($row['published_at'] ?? '');
-                if (!empty($dateHint['text']) && mb_strpos($contentL, $dateHint['text']) !== false) $hitDate = true;
-                if (!empty($dateHint['iso']) && $pubAt && strpos($pubAt, $dateHint['iso']) === 0)    $hitDate = true;
-                if ($hitDate) $boost += 0.15;
-            }
+            $boost += self::computeDateBoost($row, $dateHint, $dateIntent, $todayIso);
 
             $row['final'] = (0.5 * $bm) + (0.4 * $row['cos']) + (0.1 * $cov) + (0.1 * $num) + $boost;
         }
@@ -319,17 +329,21 @@ class SturdyChat_RAG
         $cols = self::tableColumns($table);
         $isSitemap     = ($table === STURDYCHAT_TABLE_SITEMAP);
         $source        = $isSitemap ? 'sitemap' : 'wp';
-        $hasTitle = isset($cols['title']);
-        $hasUrl = isset($cols['url']);
-        $hasCpt = isset($cols['cpt']);
+        $hasTitle       = isset($cols['title']);
+        $hasUrl         = isset($cols['url']);
+        $hasCpt         = isset($cols['cpt']);
         $hasPublishedAt = isset($cols['published_at']);
-        $hasPostId = isset($cols['post_id']);
+        $hasModifiedAt  = isset($cols['modified_at']);
+        $hasUpdatedAt   = isset($cols['updated_at']);
+        $hasPostId      = isset($cols['post_id']);
 
         if (!$hasCpt) return []; // zonder cpt-kolom kunnen we niet routeren
 
         $selUrl    = $hasUrl ? "url" : "'' AS url";
         $selTitle  = $hasTitle ? "title" : "'' AS title";
         $selPubAt  = $hasPublishedAt ? "published_at" : "NULL AS published_at";
+        $selModAt  = $hasModifiedAt  ? "modified_at"  : "NULL AS modified_at";
+        $selUpdAt  = $hasUpdatedAt   ? "updated_at"   : "NULL AS updated_at";
         $selPostId = ($isSitemap || !$hasPostId) ? "0 AS post_id" : "post_id";
 
         // FULLTEXT detectie
@@ -348,6 +362,7 @@ class SturdyChat_RAG
         if ($hasFTTitleContent && $useMatch) {
             $sql = $wpdb->prepare(
                 "SELECT id, {$selPostId}, {$selUrl} AS url, {$selTitle} AS title, cpt, {$selPubAt} AS published_at,
+                    {$selModAt} AS modified_at, {$selUpdAt} AS updated_at,
                     chunk_index, content, embedding,
                     MATCH(title, content) AGAINST (%s IN NATURAL LANGUAGE MODE) AS bm_score
              FROM {$table}
@@ -359,6 +374,7 @@ class SturdyChat_RAG
         } elseif ($hasFTContent && $useMatch) {
             $sql = $wpdb->prepare(
                 "SELECT id, {$selPostId}, {$selUrl} AS url, {$selTitle} AS title, cpt, {$selPubAt} AS published_at,
+                    {$selModAt} AS modified_at, {$selUpdAt} AS updated_at,
                     chunk_index, content, embedding,
                     MATCH(content) AGAINST (%s IN NATURAL LANGUAGE MODE) AS bm_score
              FROM {$table}
@@ -373,6 +389,7 @@ class SturdyChat_RAG
             if ($useMatch && $hasTitle) {
                 $sql = $wpdb->prepare(
                     "SELECT id, {$selPostId}, {$selUrl} AS url, {$selTitle} AS title, cpt, {$selPubAt} AS published_at,
+                        {$selModAt} AS modified_at, {$selUpdAt} AS updated_at,
                         chunk_index, content, embedding, 0 AS bm_score
                  FROM {$table}
                  WHERE cpt = %s AND (title LIKE %s OR content LIKE %s)
@@ -384,6 +401,7 @@ class SturdyChat_RAG
                 // puur op cpt, laat vector de rest doen
                 $sql = $wpdb->prepare(
                     "SELECT id, {$selPostId}, {$selUrl} AS url, {$selTitle} AS title, cpt, {$selPubAt} AS published_at,
+                        {$selModAt} AS modified_at, {$selUpdAt} AS updated_at,
                         chunk_index, content, embedding, 0 AS bm_score
                  FROM {$table}
                  WHERE cpt = %s
@@ -413,12 +431,16 @@ class SturdyChat_RAG
         $hasUrl          = isset($cols['url']);
         $hasCpt          = isset($cols['cpt']);
         $hasPublishedAt  = isset($cols['published_at']);
+        $hasModifiedAt   = isset($cols['modified_at']);
+        $hasUpdatedAt    = isset($cols['updated_at']);
         $hasPostId       = isset($cols['post_id']);
 
         $selUrl    = $hasUrl   ? "url"                     : "'' AS url";
         $selTitle  = $hasTitle ? "title"                   : "'' AS title";
         $selCpt    = $hasCpt   ? "cpt"                     : "'' AS cpt";
         $selPubAt  = $hasPublishedAt ? "published_at"      : "NULL AS published_at";
+        $selModAt  = $hasModifiedAt  ? "modified_at"       : "NULL AS modified_at";
+        $selUpdAt  = $hasUpdatedAt   ? "updated_at"        : "NULL AS updated_at";
         $selPostId = ($isSitemap || !$hasPostId) ? "0 AS post_id" : "post_id";
 
         // Detecteer FULLTEXT indexes
@@ -453,6 +475,8 @@ class SturdyChat_RAG
                     {$selTitle} AS title,
                     {$selCpt} AS cpt,
                     {$selPubAt} AS published_at,
+                    {$selModAt} AS modified_at,
+                    {$selUpdAt} AS updated_at,
                     chunk_index,
                     content,
                     embedding,
@@ -472,6 +496,8 @@ class SturdyChat_RAG
                     {$selTitle} AS title,
                     {$selCpt} AS cpt,
                     {$selPubAt} AS published_at,
+                    {$selModAt} AS modified_at,
+                    {$selUpdAt} AS updated_at,
                     chunk_index,
                     content,
                     embedding,
@@ -494,6 +520,8 @@ class SturdyChat_RAG
                         {$selTitle} AS title,
                         {$selCpt} AS cpt,
                         {$selPubAt} AS published_at,
+                        {$selModAt} AS modified_at,
+                        {$selUpdAt} AS updated_at,
                         chunk_index,
                         content,
                         embedding,
@@ -513,6 +541,8 @@ class SturdyChat_RAG
                         {$selTitle} AS title,
                         {$selCpt} AS cpt,
                         {$selPubAt} AS published_at,
+                        {$selModAt} AS modified_at,
+                        {$selUpdAt} AS updated_at,
                         chunk_index,
                         content,
                         embedding,
@@ -543,13 +573,18 @@ class SturdyChat_RAG
      * Fallback ophalen als lexical niets gaf:
      * - Filter op CPT en/of datum waar mogelijk, anders pak laatste N.
      */
-    protected static function lexicalCandidatesByCptDate(string $table, ?string $cptHint, array $dateHint, int $limit = 400): array
+    protected static function lexicalCandidatesByCptDate(string $table, ?string $cptHint, array $dateHint, array $dateIntent, int $limit = 400): array
     {
         global $wpdb;
+
+        $isSitemap = ($table === STURDYCHAT_TABLE_SITEMAP);
+        $source    = $isSitemap ? 'sitemap' : 'wp';
 
         $cols = self::tableColumns($table);
         $hasCpt         = isset($cols['cpt']);
         $hasPublishedAt = isset($cols['published_at']);
+        $hasModifiedAt  = isset($cols['modified_at']);
+        $hasUpdatedAt   = isset($cols['updated_at']);
         $hasTitle       = isset($cols['title']);
         $hasUrl         = isset($cols['url']);
         $hasPostId      = isset($cols['post_id']);
@@ -558,7 +593,18 @@ class SturdyChat_RAG
         $selTitle  = $hasTitle ? "title"              : "'' AS title";
         $selCpt    = $hasCpt   ? "cpt"                : "'' AS cpt";
         $selPubAt  = $hasPublishedAt ? "published_at" : "NULL AS published_at";
+        $selModAt  = $hasModifiedAt  ? "modified_at"  : "NULL AS modified_at";
+        $selUpdAt  = $hasUpdatedAt   ? "updated_at"   : "NULL AS updated_at";
         $selPostId = ($isSitemap || !$hasPostId) ? "0 AS post_id" : "post_id";
+
+        $primaryDateCol = '';
+        if ($hasPublishedAt) {
+            $primaryDateCol = 'published_at';
+        } elseif ($hasModifiedAt) {
+            $primaryDateCol = 'modified_at';
+        } elseif ($hasUpdatedAt) {
+            $primaryDateCol = 'updated_at';
+        }
 
         $where = [];
         $params = [];
@@ -567,12 +613,30 @@ class SturdyChat_RAG
             $where[]  = "cpt = %s";
             $params[] = $cptHint;
         }
-        if ($hasPublishedAt && !empty($dateHint['iso'])) {
-            $where[]  = "published_at = %s";
+        if ($primaryDateCol !== '' && !empty($dateHint['iso'])) {
+            $where[]  = "{$primaryDateCol} = %s";
             $params[] = $dateHint['iso'];
+        } elseif ($primaryDateCol !== '' && !empty($dateIntent['target_iso'])) {
+            $where[]  = "{$primaryDateCol} = %s";
+            $params[] = $dateIntent['target_iso'];
+        } elseif (
+            $primaryDateCol !== ''
+            && !empty($dateIntent['target_range'])
+            && !empty($dateIntent['target_range']['start'])
+            && !empty($dateIntent['target_range']['end'])
+        ) {
+            $where[]  = "{$primaryDateCol} BETWEEN %s AND %s";
+            $params[] = $dateIntent['target_range']['start'];
+            $params[] = $dateIntent['target_range']['end'];
         }
 
         $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
+
+        $order = 'id DESC';
+        if ($primaryDateCol !== '') {
+            $direction = !empty($dateIntent['want_oldest']) ? 'ASC' : 'DESC';
+            $order     = "{$primaryDateCol} {$direction}, id DESC";
+        }
 
         $sql = $wpdb->prepare(
             "SELECT
@@ -582,13 +646,15 @@ class SturdyChat_RAG
                 {$selTitle} AS title,
                 {$selCpt} AS cpt,
                 {$selPubAt} AS published_at,
+                {$selModAt} AS modified_at,
+                {$selUpdAt} AS updated_at,
                 chunk_index,
                 content,
                 embedding,
                 0 AS bm_score
              FROM {$table}
              {$whereSql}
-             ORDER BY id DESC
+             ORDER BY {$order}
              LIMIT %d",
             ...array_merge($params, [$limit])
         );
@@ -735,6 +801,257 @@ class SturdyChat_RAG
         $p = rtrim($p, '/');
         $c = '/'.trim($cpt,'/');
         return $p === $c || $p === $c.'/index';
+    }
+
+
+    /**
+     * Analyseer datumintenties in een vraag (nieuwste, vandaag, maand/jaar, …).
+     * @return array{
+     *   want_latest:bool,
+     *   want_oldest:bool,
+     *   target_iso:string,
+     *   target_range:array{start:string,end:string},
+     *   today_iso:string
+     * }
+     */
+    private static function detectDateIntent(string $q, string $todayIso): array
+    {
+        $t = mb_strtolower($q);
+
+        $intent = [
+            'want_latest'  => false,
+            'want_oldest'  => false,
+            'target_iso'   => '',
+            'target_range' => ['start' => '', 'end' => ''],
+            'today_iso'    => $todayIso,
+        ];
+
+        if (preg_match('/\b(nieuwste|laatste|recentste)\b/u', $t) || mb_strpos($t, 'meest recent') !== false || mb_strpos($t, 'recente artikelen') !== false) {
+            $intent['want_latest'] = true;
+        }
+        if (preg_match('/\b(oudste|eerste|allereerste|vroegste)\b/u', $t)) {
+            $intent['want_oldest'] = true;
+        }
+
+        try {
+            $tz    = new \DateTimeZone('UTC');
+            $today = new \DateTimeImmutable($todayIso, $tz);
+        } catch (\Exception $e) {
+            $today = null;
+        }
+
+        if ($today) {
+            if (mb_strpos($t, 'overmorgen') !== false) {
+                $intent['target_iso'] = $today->modify('+2 days')->format('Y-m-d');
+            } elseif (mb_strpos($t, 'morgen') !== false) {
+                $intent['target_iso'] = $today->modify('+1 day')->format('Y-m-d');
+            } elseif (mb_strpos($t, 'eergisteren') !== false) {
+                $intent['target_iso'] = $today->modify('-2 days')->format('Y-m-d');
+            } elseif (mb_strpos($t, 'gisteren') !== false) {
+                $intent['target_iso'] = $today->modify('-1 day')->format('Y-m-d');
+            } elseif (mb_strpos($t, 'vandaag') !== false) {
+                $intent['target_iso'] = $today->format('Y-m-d');
+            }
+
+            $year = (int) $today->format('Y');
+            if (empty($intent['target_range']['start'])) {
+                if (mb_strpos($t, 'dit jaar') !== false) {
+                    $intent['target_range'] = [
+                        'start' => sprintf('%04d-01-01', $year),
+                        'end'   => sprintf('%04d-12-31', $year),
+                    ];
+                } elseif (mb_strpos($t, 'vorig jaar') !== false) {
+                    $intent['target_range'] = [
+                        'start' => sprintf('%04d-01-01', $year - 1),
+                        'end'   => sprintf('%04d-12-31', $year - 1),
+                    ];
+                } elseif (mb_strpos($t, 'volgend jaar') !== false || mb_strpos($t, 'komend jaar') !== false) {
+                    $intent['target_range'] = [
+                        'start' => sprintf('%04d-01-01', $year + 1),
+                        'end'   => sprintf('%04d-12-31', $year + 1),
+                    ];
+                }
+            }
+
+            if (empty($intent['target_range']['start'])) {
+                if (mb_strpos($t, 'deze maand') !== false || mb_strpos($t, 'dit maand') !== false) {
+                    $intent['target_range'] = [
+                        'start' => $today->modify('first day of this month')->format('Y-m-d'),
+                        'end'   => $today->modify('last day of this month')->format('Y-m-d'),
+                    ];
+                } elseif (mb_strpos($t, 'vorige maand') !== false) {
+                    $intent['target_range'] = [
+                        'start' => $today->modify('first day of last month')->format('Y-m-d'),
+                        'end'   => $today->modify('last day of last month')->format('Y-m-d'),
+                    ];
+                } elseif (mb_strpos($t, 'volgende maand') !== false || mb_strpos($t, 'komende maand') !== false) {
+                    $intent['target_range'] = [
+                        'start' => $today->modify('first day of next month')->format('Y-m-d'),
+                        'end'   => $today->modify('last day of next month')->format('Y-m-d'),
+                    ];
+                }
+            }
+        }
+
+        $months = [
+            'januari' => 1,
+            'februari' => 2,
+            'maart' => 3,
+            'april' => 4,
+            'mei' => 5,
+            'juni' => 6,
+            'juli' => 7,
+            'augustus' => 8,
+            'september' => 9,
+            'oktober' => 10,
+            'november' => 11,
+            'december' => 12,
+        ];
+
+        if (empty($intent['target_range']['start']) && preg_match('/\b(januari|februari|maart|april|mei|juni|juli|augustus|september|oktober|november|december)\s+(\d{4})\b/u', $t, $m)) {
+            $month = (int) ($months[$m[1]] ?? 0);
+            $year  = (int) $m[2];
+            if ($month >= 1 && $month <= 12 && $year > 0) {
+                try {
+                    $start = new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $month), new \DateTimeZone('UTC'));
+                    $intent['target_range'] = [
+                        'start' => $start->format('Y-m-d'),
+                        'end'   => $start->modify('last day of this month')->format('Y-m-d'),
+                    ];
+                } catch (\Exception $e) {
+                    // negeren
+                }
+            }
+        }
+
+        if (empty($intent['target_range']['start']) && preg_match('/\b(?:in|uit|van|voor|na|per)\s+((?:19|20)\d{2})\b/u', $t, $mYear)) {
+            $year = (int) $mYear[1];
+            if ($year >= 1900 && $year <= 2100) {
+                $intent['target_range'] = [
+                    'start' => sprintf('%04d-01-01', $year),
+                    'end'   => sprintf('%04d-12-31', $year),
+                ];
+            }
+        }
+
+        if (empty($intent['target_range']['start']) && mb_strpos($t, 'jaar') !== false && preg_match('/\b((?:19|20)\d{2})\b/u', $t, $mSingleYear)) {
+            $year = (int) $mSingleYear[1];
+            if ($year >= 1900 && $year <= 2100) {
+                $intent['target_range'] = [
+                    'start' => sprintf('%04d-01-01', $year),
+                    'end'   => sprintf('%04d-12-31', $year),
+                ];
+            }
+        }
+
+        return $intent;
+    }
+
+    /**
+     * Berekent extra score op basis van datumhits en intenties.
+     */
+    private static function computeDateBoost(array $row, array $dateHint, array $dateIntent, string $todayIso): float
+    {
+        $boost    = 0.0;
+        $contentL = mb_strtolower((string)($row['content'] ?? ''));
+        $urlL     = mb_strtolower((string)($row['url'] ?? ''));
+        $info     = self::rowDateInfo($row);
+
+        if (!empty($dateHint['text'])) {
+            $needle = mb_strtolower($dateHint['text']);
+            if ($needle !== '') {
+                if ($contentL !== '' && mb_strpos($contentL, $needle) !== false) {
+                    $boost += 0.05;
+                }
+                if ($urlL !== '' && mb_strpos($urlL, $needle) !== false) {
+                    $boost += 0.03;
+                }
+            }
+        }
+
+        if (!empty($dateIntent['target_iso'])) {
+            $needleIso = mb_strtolower($dateIntent['target_iso']);
+            if ($needleIso !== '') {
+                if ($contentL !== '' && mb_strpos($contentL, $needleIso) !== false) {
+                    $boost += 0.04;
+                }
+                if ($urlL !== '' && mb_strpos($urlL, $needleIso) !== false) {
+                    $boost += 0.02;
+                }
+            }
+        }
+
+        $rowRaw = (string) ($info['raw'] ?? '');
+        $rowTs  = is_int($info['ts'] ?? null) ? (int) $info['ts'] : null;
+
+        if ($rowRaw !== '') {
+            if (!empty($dateHint['iso']) && mb_strpos($rowRaw, $dateHint['iso']) === 0) {
+                $boost += 0.25;
+            }
+            if (!empty($dateIntent['target_iso']) && mb_strpos($rowRaw, $dateIntent['target_iso']) === 0) {
+                $boost += 0.2;
+            }
+
+            if (
+                !empty($dateIntent['target_range']['start'])
+                && !empty($dateIntent['target_range']['end'])
+                && $rowTs
+            ) {
+                $startTs = strtotime($dateIntent['target_range']['start'] . ' 00:00:00 UTC');
+                $endTs   = strtotime($dateIntent['target_range']['end'] . ' 23:59:59 UTC');
+                if ($startTs && $endTs && $rowTs >= $startTs && $rowTs <= $endTs) {
+                    $boost += 0.15;
+                }
+            }
+        }
+
+        $todayTs = strtotime($todayIso . ' 00:00:00 UTC');
+        if (!empty($dateIntent['want_latest']) && $rowTs && $todayTs) {
+            $diffDays = ($todayTs - $rowTs) / 86400.0;
+            $recentScore = $diffDays >= 0 ? 1.0 / (1.0 + (max(0.0, $diffDays) / 3.0)) : 1.0;
+            $boost += 0.25 * max(0.0, min(1.0, $recentScore));
+        }
+
+        if (!empty($dateIntent['want_oldest']) && $rowTs && $todayTs) {
+            $ageDays = ($todayTs - $rowTs) / 86400.0;
+            if ($ageDays > 0) {
+                $ageScore = min(1.0, max(0.0, $ageDays / 365.0));
+                $boost += 0.2 * $ageScore;
+            }
+        }
+
+        return $boost;
+    }
+
+    /**
+     * Haal de beste beschikbare datum uit een rij (published/modified/updated).
+     * @return array{source:string,raw:string,iso:string,ts:?int}
+     */
+    private static function rowDateInfo(array $row): array
+    {
+        foreach (['published_at', 'modified_at', 'updated_at'] as $field) {
+            $raw = trim((string) ($row[$field] ?? ''));
+            if ($raw === '') {
+                continue;
+            }
+            $ts = strtotime($raw . ' UTC');
+            if ($ts === false) {
+                continue;
+            }
+            return [
+                'source' => $field,
+                'raw'    => $raw,
+                'iso'    => gmdate('Y-m-d', $ts),
+                'ts'     => $ts,
+            ];
+        }
+
+        return [
+            'source' => '',
+            'raw'    => '',
+            'iso'    => '',
+            'ts'     => null,
+        ];
     }
 
 
