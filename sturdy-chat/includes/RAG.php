@@ -49,11 +49,14 @@ class SturdyChat_RAG
             return ['ok' => false, 'message' => 'OpenAI API Key ontbreekt. Stel deze in.'];
         }
 
+        $today = function_exists('wp_date') ? wp_date('Y-m-d') : date_i18n('Y-m-d');
+
         $sys = "Je antwoordt uitsluitend met feiten die letterlijk uit de CONTEXT-snippets blijken.
 - Geen externe kennis of aannames.
 - Als gevraagde info niet expliciet voorkomt, zeg: 'Dit staat niet in de huidige kennisbank/context.'
 - Houd het kort en duidelijk in het Nederlands (2–4 zinnen).
-- Noem geen namen/feiten die niet in de context staan.";
+- Noem geen namen/feiten die niet in de context staan.
+- Datum van vandaag is: {$today}.";
 
         $messages = [
             ['role' => 'system', 'content' => $sys],
