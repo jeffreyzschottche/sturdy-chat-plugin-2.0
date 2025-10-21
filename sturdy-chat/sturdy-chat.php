@@ -134,7 +134,9 @@ add_action('plugins_loaded', function () {
     if (class_exists('SturdyChat_Admin')) {
         add_action('admin_menu', ['SturdyChat_Admin', 'registerMenu']);
         add_action('admin_init', ['SturdyChat_Admin', 'registerSettings'], 20);
+        add_action('admin_enqueue_scripts', ['SturdyChat_Admin', 'enqueueAssets']);
         add_action('admin_post_sturdychat_index_sitemap', ['SturdyChat_Admin', 'handleIndexSitemap']);
+        add_action('wp_ajax_sturdychat_run_sitemap', ['SturdyChat_Admin', 'ajaxRunSitemap']);
 
     }
     if (class_exists('SturdyChat_REST')) {

@@ -37,6 +37,41 @@ class SturdyChat_Admin
     }
 
     /**
+     * Enqueue styles and scripts for the Sturdy Chat admin page.
+     */
+    public static function enqueueAssets(string $hook): void
+    {
+        if ($hook !== 'toplevel_page_sturdychat') {
+            return;
+        }
+
+        wp_enqueue_style(
+            'sturdychat-admin',
+            STURDYCHAT_URL . 'assets/css/admin.css',
+            [],
+            STURDYCHAT_VERSION
+        );
+
+        wp_enqueue_script(
+            'sturdychat-admin',
+            STURDYCHAT_URL . 'assets/js/admin-sitemap.js',
+            [],
+            STURDYCHAT_VERSION,
+            true
+        );
+
+        wp_localize_script('sturdychat-admin', 'SturdyChatAdmin', [
+            'ajaxUrl'  => admin_url('admin-ajax.php'),
+            'nonce'    => wp_create_nonce('sturdychat_run_sitemap'),
+            'strings'  => [
+                'starting'     => __('Indexeren gestart…', 'sturdychat-chatbot'),
+                'httpError'    => __('Kon geen verbinding maken met de server.', 'sturdychat-chatbot'),
+                'unknownError' => __('Onbekende fout opgetreden.', 'sturdychat-chatbot'),
+            ],
+        ]);
+    }
+
+    /**
      * Registers and defines the settings for the SturdyChat plugin.
      *
      * This method sets up a settings group and links it to validation/sanitization callbacks.
@@ -345,7 +380,11 @@ class SturdyChat_Admin
         echo '<div class="card" style="max-width:600px;margin-bottom:20px;">';
         echo '<h2>' . esc_html__('Index sitemap', 'sturdychat-chatbot') . '</h2>';
         echo '<p>' . esc_html__('Crawl the configured sitemap and refresh the vector index used for retrieval.', 'sturdychat-chatbot') . '</p>';
-        echo '<p><a class="button button-primary" href="' . esc_url($indexUrl) . '">' . esc_html__('Start indexing', 'sturdychat-chatbot') . '</a></p>';
+        echo '<p><button type="button" class="button button-primary" id="sturdychat-start-indexing" data-fallback="' . esc_url($indexUrl) . '">' . esc_html__('Start indexing', 'sturdychat-chatbot') . '</button></p>';
+        echo '<noscript><p><a class="button" href="' . esc_url($indexUrl) . '">' . esc_html__('Start indexing (zonder live-log)', 'sturdychat-chatbot') . '</a></p></noscript>';
+        echo '<p class="description">' . esc_html__('De log hieronder wordt geleegd wanneer je opnieuw start.', 'sturdychat-chatbot') . '</p>';
+        echo '<div id="sturdychat-sitemap-summary" class="sc-log-summary" aria-live="polite"></div>';
+        echo '<div id="sturdychat-sitemap-log" class="sc-log" aria-live="polite"></div>';
         echo '</div>';
 
         echo '<form method="post" action="options.php">';
@@ -355,6 +394,35 @@ class SturdyChat_Admin
         echo '</form>';
 
         echo '</div>';
+    }
+
+    /**
+     * AJAX handler to index the sitemap and stream back log lines.
+     */
+    public static function ajaxRunSitemap(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => __('Geen toegang.', 'sturdychat-chatbot')], 403);
+        }
+
+        check_ajax_referer('sturdychat_run_sitemap', 'nonce');
+
+        $logs = [];
+        $s    = get_option('sturdychat_settings', []);
+
+        $res = SturdyChat_SitemapIndexer::indexAll($s, static function (string $message, string $type = 'info') use (&$logs): void {
+            $logs[] = [
+                'message' => $message,
+                'type'    => $type,
+            ];
+        });
+
+        wp_send_json([
+            'ok'      => $res['ok'],
+            'message' => $res['message'],
+            'logs'    => $logs,
+            'stats'   => $res['stats'] ?? [],
+        ]);
     }
 
     /**
