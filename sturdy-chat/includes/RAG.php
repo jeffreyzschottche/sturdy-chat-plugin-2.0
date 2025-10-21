@@ -195,6 +195,9 @@ class SturdyChat_RAG
 
         // (4) Vector re-ranking + boosts
         $qvec = SturdyChat_Embedder::embed($query, $s);
+        $nowTs      = function_exists('current_time') ? (int) current_time('timestamp') : time();
+        $daySeconds = defined('DAY_IN_SECONDS') ? (int) DAY_IN_SECONDS : 86400;
+
         foreach ($filtered as &$row) {
             $e = json_decode((string) ($row['embedding'] ?? '[]'), true);
             $row['cos'] = ($e && is_array($e)) ? SturdyChat_Embedder::cosine($qvec, $e) : 0.0;
@@ -210,6 +213,19 @@ class SturdyChat_RAG
             // CPT-voorrang + hub super-boost
             if (!empty($row['_cpt_match'])) $boost += 0.50;
             if (!empty($row['_hub']))       $boost += 0.45;
+
+            // Recency-boost: max +0.1 voor zeer recente content, lineair aflopend tot 0 na ~1 jaar
+            $pubAt = trim((string) ($row['published_at'] ?? ''));
+            if ($pubAt !== '') {
+                $ts = strtotime($pubAt);
+                if ($ts !== false && $ts > 0) {
+                    $ageDays = max(0.0, ($nowTs - $ts) / max(1, $daySeconds));
+                    if ($ageDays < 366.0) {
+                        $freshFactor = max(0.0, 1.0 - ($ageDays / 365.0));
+                        $boost += 0.1 * $freshFactor;
+                    }
+                }
+            }
 
             // Datum-boost
             if (!empty($dateHint['iso']) || !empty($dateHint['text'])) {
