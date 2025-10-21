@@ -16,10 +16,12 @@ class SturdyChat_Indexer
      */
     public static function indexAll(array $s): array
     {
+        $settings = sturdychat_settings_with_defaults($s);
+
         // fallback to public types
-        $configured = isset($s['index_post_types']) ? (array) $s['index_post_types'] : [];
+        $configured = isset($settings['index_post_types']) ? (array) $settings['index_post_types'] : [];
         $types = array_values(array_unique(array_merge($configured, sturdychat_all_public_types())));
-        $batch = max(1, (int) ($s['batch_size'] ?? 25));
+        $batch = max(1, (int) $settings['batch_size']);
 
         $args = [
             'post_type' => $types,
@@ -38,7 +40,7 @@ class SturdyChat_Indexer
                 $ids = $q->posts;
                 if (!$ids)
                     break;
-                self::indexPosts($ids, $s);
+                self::indexPosts($ids, $settings);
                 $total += count($ids);
                 $args['paged']++;
             } while (count($ids) === $batch);
@@ -61,14 +63,15 @@ class SturdyChat_Indexer
     {
         global $wpdb;
         $table = STURDYCHAT_TABLE;
-        $chunk_chars = max(400, (int) ($s['chunk_chars'] ?? 1200));
+        $settings = sturdychat_settings_with_defaults($s);
+        $chunk_chars = max(400, (int) $settings['chunk_chars']);
 
         foreach ($post_ids as $post_id) {
             $post = get_post($post_id);
             if (!$post || $post->post_status !== 'publish')
                 continue;
 
-            $content = self::collectContent($post, $s);
+            $content = self::collectContent($post, $settings);
             $content = wp_strip_all_tags(strip_shortcodes(apply_filters('the_content', $content)));
             $hash = hash('sha256', $content);
 
@@ -82,7 +85,7 @@ class SturdyChat_Indexer
             $now = current_time('mysql');
 
             foreach ($chunks as $i => $chunk) {
-                $vec = SturdyChat_Embedder::embed($chunk, $s);
+                $vec = SturdyChat_Embedder::embed($chunk, $settings);
                 $wpdb->insert($table, [
                     'post_id' => $post_id,
                     'chunk_index' => $i,
@@ -108,9 +111,10 @@ class SturdyChat_Indexer
      */
     protected static function collectContent(WP_Post $post, array $s): string
     {
+        $settings = sturdychat_settings_with_defaults($s);
         $parts = [get_the_title($post), $post->post_content];
 
-        if (!empty($s['include_taxonomies'])) {
+        if (!empty($settings['include_taxonomies'])) {
             $taxes = get_object_taxonomies($post->post_type);
             foreach ($taxes as $tax) {
                 $terms = get_the_terms($post, $tax);
@@ -120,8 +124,8 @@ class SturdyChat_Indexer
             }
         }
 
-        if (!empty($s['include_meta'])) {
-            $keys = array_filter(array_map('trim', explode(',', (string) ($s['meta_keys'] ?? ''))));
+        if (!empty($settings['include_meta'])) {
+            $keys = array_filter(array_map('trim', explode(',', (string) $settings['meta_keys'])));
             foreach ($keys as $k) {
                 $v = get_post_meta($post->ID, $k, true);
                 if ($v !== '')
@@ -131,12 +135,11 @@ class SturdyChat_Indexer
 
         // Enrich cpt trough modules
         if (class_exists('SturdyChat_CPTs')) {
-            $parts = SturdyChat_CPTs::enrich($post, $parts, $s);
+            $parts = SturdyChat_CPTs::enrich($post, $parts, $settings);
         }
 
         return trim(implode("\n\n", array_filter($parts)));
     }
-
 
     /**
      * Splits a given text into chunks, ensuring each chunk does not exceed a specified maximum character length,

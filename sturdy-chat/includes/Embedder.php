@@ -11,16 +11,17 @@ class SturdyChat_Embedder
      * @param array $settings Configuration settings, including 'openai_api_base', 'openai_api_key', and 'embed_model'.
      *                        'openai_api_base' specifies the API base URL.
      *                        'openai_api_key' provides the API key for authentication.
-     *                        'embed_model' defines the model to use (defaults to 'text-embedding-3-small').
+     *                        'embed_model' defines the model to use (default configured via sturdychat_default_settings()).
      * @return array The computed embedding as a normalized array of floating-point values.
      *
      * @throws RuntimeException If the API key is missing, the API call fails, or the response is invalid.
      */
     public static function embed(string $text, array $settings): array
     {
-        $base = rtrim($settings['openai_api_base'] ?? 'https://api.openai.com/v1', '/');
-        $key = trim($settings['openai_api_key'] ?? '');
-        $model = $settings['embed_model'] ?? 'text-embedding-3-small';
+        $settings = sturdychat_settings_with_defaults($settings);
+        $base = rtrim($settings['openai_api_base'], '/');
+        $key = trim($settings['openai_api_key']);
+        $model = $settings['embed_model'];
         if (!$key)
             throw new RuntimeException('OpenAI API Key ontbreekt.');
 

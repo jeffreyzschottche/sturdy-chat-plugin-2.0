@@ -50,7 +50,7 @@ class SturdyChat_Admin
         register_setting('sturdychat_settings_group', 'sturdychat_settings', [
             'type'              => 'array',
             'sanitize_callback' => [__CLASS__, 'sanitizeSettings'],
-            'default'           => [],
+            'default'           => sturdychat_default_settings(),
         ]);
 
         add_settings_section('sturdychat_main', __('General', 'sturdychat-chatbot'), '__return_false', 'sturdychat');
@@ -76,8 +76,8 @@ class SturdyChat_Admin
             'sitemap_url',
             'Sitemap URL',
             function (): void {
-                $s = get_option('sturdychat_settings', []);
-                $v = esc_attr($s['sitemap_url'] ?? home_url('/sitemap_index.xml'));
+                $s = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
+                $v = esc_attr($s['sitemap_url']);
                 echo '<input type="text" class="regular-text" name="sturdychat_settings[sitemap_url]" value="' . $v . '" />';
                 echo '<p class="description">Root sitemap (e.g., Yoast): usually /sitemap_index.xml</p>';
             },
@@ -96,16 +96,17 @@ class SturdyChat_Admin
      */
     public static function sanitizeSettings($in): array
     {
-        $in  = is_array($in) ? $in : [];
-        $out = [];
+        $in       = is_array($in) ? $in : [];
+        $defaults = sturdychat_default_settings();
+        $out      = [];
 
-        $out['provider']        = 'openai';
-        $out['openai_api_base'] = isset($in['openai_api_base']) ? esc_url_raw($in['openai_api_base']) : 'https://api.openai.com/v1';
-        $out['openai_api_key']  = isset($in['openai_api_key']) ? sanitize_text_field($in['openai_api_key']) : '';
-        $out['embed_model']     = !empty($in['embed_model']) ? sanitize_text_field($in['embed_model']) : 'text-embedding-3-small';
-        $out['chat_model']      = !empty($in['chat_model']) ? sanitize_text_field($in['chat_model']) : 'gpt-4o-mini';
-        $out['top_k']           = max(1, min(12, (int) ($in['top_k'] ?? 6)));
-        $out['temperature']     = max(0, min(1, (float) ($in['temperature'] ?? 0.2)));
+        $out['provider']        = $defaults['provider'];
+        $out['openai_api_base'] = isset($in['openai_api_base']) ? esc_url_raw($in['openai_api_base']) : $defaults['openai_api_base'];
+        $out['openai_api_key']  = isset($in['openai_api_key']) ? sanitize_text_field($in['openai_api_key']) : $defaults['openai_api_key'];
+        $out['embed_model']     = !empty($in['embed_model']) ? sanitize_text_field($in['embed_model']) : $defaults['embed_model'];
+        $out['chat_model']      = !empty($in['chat_model']) ? sanitize_text_field($in['chat_model']) : $defaults['chat_model'];
+        $out['top_k']           = max(1, min(12, (int) ($in['top_k'] ?? $defaults['top_k'])));
+        $out['temperature']     = max(0, min(1, (float) ($in['temperature'] ?? $defaults['temperature'])));
 
         // Post types: default to all public CPTs (excluding attachment).
         $allPublic = sturdychat_all_public_types();
@@ -113,18 +114,18 @@ class SturdyChat_Admin
             $chosen = array_map('sanitize_text_field', $in['index_post_types']);
             $out['index_post_types'] = array_values(array_unique(array_merge($chosen, $allPublic)));
         } else {
-            $out['index_post_types'] = $allPublic;
+            $out['index_post_types'] = $defaults['index_post_types'];
         }
 
-        $out['include_taxonomies'] = !empty($in['include_taxonomies']) ? 1 : 0;
-        $out['include_meta']       = !empty($in['include_meta']) ? 1 : 0;
-        $out['meta_keys']          = isset($in['meta_keys']) ? sanitize_text_field($in['meta_keys']) : '';
-        $out['batch_size']         = max(1, (int) ($in['batch_size'] ?? 25));
-        $out['chunk_chars']        = max(400, min(4000, (int) ($in['chunk_chars'] ?? 1200)));
-        $out['chat_title']         = !empty($in['chat_title']) ? sanitize_text_field($in['chat_title']) : 'Stel je vraag';
+        $out['include_taxonomies'] = !empty($in['include_taxonomies']) ? 1 : (int) $defaults['include_taxonomies'];
+        $out['include_meta']       = !empty($in['include_meta']) ? 1 : (int) $defaults['include_meta'];
+        $out['meta_keys']          = isset($in['meta_keys']) ? sanitize_text_field($in['meta_keys']) : $defaults['meta_keys'];
+        $out['batch_size']         = max(1, (int) ($in['batch_size'] ?? $defaults['batch_size']));
+        $out['chunk_chars']        = max(400, min(4000, (int) ($in['chunk_chars'] ?? $defaults['chunk_chars'])));
+        $out['chat_title']         = !empty($in['chat_title']) ? sanitize_text_field($in['chat_title']) : $defaults['chat_title'];
 
         // New
-        $out['sitemap_url'] = isset($in['sitemap_url']) ? esc_url_raw($in['sitemap_url']) : home_url('/sitemap_index.xml');
+        $out['sitemap_url'] = isset($in['sitemap_url']) ? esc_url_raw($in['sitemap_url']) : $defaults['sitemap_url'];
 
         return $out;
     }
@@ -146,10 +147,10 @@ class SturdyChat_Admin
      */
     public static function fieldOpenaiBase(): void
     {
-        $s = get_option('sturdychat_settings', []);
+        $s = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
         printf(
             '<input type="url" name="sturdychat_settings[openai_api_base]" value="%s" class="regular-text" placeholder="https://api.openai.com/v1" />',
-            esc_attr($s['openai_api_base'] ?? '')
+            esc_attr($s['openai_api_base'])
         );
     }
 
@@ -160,10 +161,10 @@ class SturdyChat_Admin
      */
     public static function fieldOpenaiKey(): void
     {
-        $s = get_option('sturdychat_settings', []);
+        $s = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
         printf(
             '<input type="password" name="sturdychat_settings[openai_api_key]" value="%s" class="regular-text" />',
-            esc_attr($s['openai_api_key'] ?? '')
+            esc_attr($s['openai_api_key'])
         );
         echo '<p class="description">Server-side only.</p>';
     }
@@ -175,8 +176,8 @@ class SturdyChat_Admin
      */
     public static function fieldEmbedModel(): void
     {
-        $s   = get_option('sturdychat_settings', []);
-        $val = $s['embed_model'] ?? 'text-embedding-3-small';
+        $s   = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
+        $val = $s['embed_model'];
         printf('<input type="text" name="sturdychat_settings[embed_model]" value="%s" class="regular-text" />', esc_attr($val));
     }
 
@@ -187,8 +188,8 @@ class SturdyChat_Admin
      */
     public static function fieldChatModel(): void
     {
-        $s   = get_option('sturdychat_settings', []);
-        $val = $s['chat_model'] ?? 'gpt-4o-mini';
+        $s   = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
+        $val = $s['chat_model'];
         printf('<input type="text" name="sturdychat_settings[chat_model]" value="%s" class="regular-text" />', esc_attr($val));
     }
 
@@ -199,8 +200,8 @@ class SturdyChat_Admin
      */
     public static function fieldTopK(): void
     {
-        $s = get_option('sturdychat_settings', []);
-        printf('<input type="number" min="1" max="12" name="sturdychat_settings[top_k]" value="%d" class="small-text" />', (int) ($s['top_k'] ?? 6));
+        $s = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
+        printf('<input type="number" min="1" max="12" name="sturdychat_settings[top_k]" value="%d" class="small-text" />', (int) $s['top_k']);
     }
 
     /**
@@ -210,10 +211,10 @@ class SturdyChat_Admin
      */
     public static function fieldTemperature(): void
     {
-        $s = get_option('sturdychat_settings', []);
+        $s = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
         printf(
             '<input type="number" step="0.1" min="0" max="1" name="sturdychat_settings[temperature]" value="%s" class="small-text" />',
-            esc_attr((string) ($s['temperature'] ?? 0.2))
+            esc_attr((string) $s['temperature'])
         );
     }
 
@@ -224,7 +225,7 @@ class SturdyChat_Admin
      */
     public static function fieldPostTypes(): void
     {
-        $s        = get_option('sturdychat_settings', []);
+        $s        = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
         $all      = sturdychat_all_public_types();
         $selected = isset($s['index_post_types']) && is_array($s['index_post_types']) ? $s['index_post_types'] : $all;
 
@@ -251,7 +252,7 @@ class SturdyChat_Admin
      */
     public static function fieldIncludeTax(): void
     {
-        $s = get_option('sturdychat_settings', []);
+        $s = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
         printf(
             '<label><input type="checkbox" name="sturdychat_settings[include_taxonomies]" value="1" %s> %s</label>',
             checked(!empty($s['include_taxonomies']), true, false),
@@ -266,7 +267,7 @@ class SturdyChat_Admin
      */
     public static function fieldIncludeMeta(): void
     {
-        $s = get_option('sturdychat_settings', []);
+        $s = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
         printf(
             '<label><input type="checkbox" name="sturdychat_settings[include_meta]" value="1" %s> %s</label>',
             checked(!empty($s['include_meta']), true, false),
@@ -281,10 +282,10 @@ class SturdyChat_Admin
      */
     public static function fieldMetaKeys(): void
     {
-        $s = get_option('sturdychat_settings', []);
+        $s = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
         printf(
             '<input type="text" name="sturdychat_settings[meta_keys]" value="%s" class="regular-text" placeholder="key1, key2" />',
-            esc_attr($s['meta_keys'] ?? '')
+            esc_attr($s['meta_keys'])
         );
     }
 
@@ -295,8 +296,8 @@ class SturdyChat_Admin
      */
     public static function fieldBatchSize(): void
     {
-        $s = get_option('sturdychat_settings', []);
-        printf('<input type="number" min="1" max="500" name="sturdychat_settings[batch_size]" value="%d" class="small-text" />', (int) ($s['batch_size'] ?? 25));
+        $s = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
+        printf('<input type="number" min="1" max="500" name="sturdychat_settings[batch_size]" value="%d" class="small-text" />', (int) $s['batch_size']);
     }
 
     /**
@@ -306,8 +307,8 @@ class SturdyChat_Admin
      */
     public static function fieldChunkChars(): void
     {
-        $s = get_option('sturdychat_settings', []);
-        printf('<input type="number" min="400" max="4000" name="sturdychat_settings[chunk_chars]" value="%d" class="small-text" />', (int) ($s['chunk_chars'] ?? 1200));
+        $s = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
+        printf('<input type="number" min="400" max="4000" name="sturdychat_settings[chunk_chars]" value="%d" class="small-text" />', (int) $s['chunk_chars']);
     }
 
     /**
@@ -317,8 +318,8 @@ class SturdyChat_Admin
      */
     public static function fieldChatTitle(): void
     {
-        $s = get_option('sturdychat_settings', []);
-        printf('<input type="text" name="sturdychat_settings[chat_title]" value="%s" class="regular-text" />', esc_attr($s['chat_title'] ?? 'Stel je vraag'));
+        $s = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
+        printf('<input type="text" name="sturdychat_settings[chat_title]" value="%s" class="regular-text" />', esc_attr($s['chat_title']));
     }
 
     /**
@@ -370,7 +371,7 @@ class SturdyChat_Admin
 
         check_admin_referer('sturdychat_index_sitemap');
 
-        $s   = get_option('sturdychat_settings', []);
+        $s   = sturdychat_settings_with_defaults(get_option('sturdychat_settings', []));
         $res = SturdyChat_SitemapIndexer::indexAll($s);
 
         $msg = $res['ok'] ? $res['message'] : ('Failed: ' . $res['message']);
