@@ -45,14 +45,14 @@ class SturdyChat_CPTs
 //        if (!class_exists('SturdyChat_CPT_Jobs')) {
 //            require_once STURDYCHAT_DIR . 'logic/CPT/Jobs.php';
 //        }
-        if (!class_exists('SturdyChat_CPT_Posts')) {
-            require_once STURDYCHAT_DIR . 'logic/CPT/Posts.php';
-        }
+        // if (!class_exists('SturdyChat_CPT_Posts')) {
+        //     require_once STURDYCHAT_DIR . 'logic/CPT/Posts.php';
+        // }
 //        if (!class_exists('SturdyChat_CPT_Traineeships')) {
 //            require_once STURDYCHAT_DIR . 'logic/CPT/Traineeships.php';
 //        }
 //        self::register(new SturdyChat_CPT_Jobs());
-        self::register(new SturdyChat_CPT_Posts());
+        // self::register(new SturdyChat_CPT_Posts());
 //        self::register(new SturdyChat_CPT_Traineeships());
     }
 

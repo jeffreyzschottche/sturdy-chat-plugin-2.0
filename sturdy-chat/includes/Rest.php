@@ -73,13 +73,20 @@ class SturdyChat_REST
 //                // Paste Bron/Source under the answer
                 $answer = (string) $maybe['answer'];
                 $sources = isset($maybe['sources']) && is_array($maybe['sources']) ? $maybe['sources'] : [];
-                if (!empty($sources) && !empty($sources[0]['url'])) {
+                $fallbackAnswer = (class_exists('SturdyChat_RAG') && defined('SturdyChat_RAG::FALLBACK_ANSWER'))
+                    ? SturdyChat_RAG::FALLBACK_ANSWER
+                    : null;
+                $isFallback = ($fallbackAnswer !== null && $answer === $fallbackAnswer);
+                if ($isFallback) {
+                    $sources = [];
+                }
+                if (!empty($sources) && !empty($sources[0]['url']) && !$isFallback) {
                     $answer .= "\n\nBron: " . $sources[0]['url'];
                 }
 
                 return new WP_REST_Response([
                     'answer'  => $answer,
-                    'sources' => array_map(
+                    'sources' => $isFallback ? [] : array_map(
                         fn($src) => [
                             'title' => $src['title'] ?? '',
                             'url'   => $src['url'] ?? '',
@@ -104,13 +111,20 @@ class SturdyChat_REST
 
             $answer  = (string) ($out['answer'] ?? '');
             $sources = isset($out['sources']) && is_array($out['sources']) ? $out['sources'] : [];
-            if (!empty($sources) && !empty($sources[0]['url'])) {
+            $fallbackAnswer = (class_exists('SturdyChat_RAG') && defined('SturdyChat_RAG::FALLBACK_ANSWER'))
+                ? SturdyChat_RAG::FALLBACK_ANSWER
+                : null;
+            $isFallback = ($fallbackAnswer !== null && $answer === $fallbackAnswer);
+            if ($isFallback) {
+                $sources = [];
+            }
+            if (!empty($sources) && !empty($sources[0]['url']) && !$isFallback) {
                 $answer .= "\n\nBron: " . $sources[0]['url'];
             }
 
             return new WP_REST_Response([
                 'answer'  => $answer,
-                'sources' => array_map(
+                'sources' => $isFallback ? [] : array_map(
                     fn($src) => [
                         'title' => $src['title'] ?? '',
                         'url'   => $src['url'] ?? '',

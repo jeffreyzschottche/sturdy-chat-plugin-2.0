@@ -15,6 +15,8 @@ if (!defined('ABSPATH')) {
  */
 class SturdyChat_RAG
 {
+    public const FALLBACK_ANSWER = 'Deze informatie bestaat niet in onze huidige kennisbank. Probeer je vraag specifieker te stellen of gebruik andere trefwoorden.';
+
     /**
      * Antwoordt op de vraag met uitsluitend context uit de index (closed-book).
      *
@@ -36,7 +38,7 @@ class SturdyChat_RAG
         if ($ctx === '') {
             return [
                 'ok'      => true,
-                'answer'  => "Dit staat niet in de huidige kennisbank/context. Kun je het preciezer formuleren of andere trefwoorden proberen?",
+                'answer'  => self::FALLBACK_ANSWER,
                 'sources' => [],
             ];
         }
@@ -50,10 +52,11 @@ class SturdyChat_RAG
         }
 
         $today = function_exists('wp_date') ? wp_date('Y-m-d') : date_i18n('Y-m-d');
+        $fallbackAnswer = self::FALLBACK_ANSWER;
 
         $sys = "Je antwoordt uitsluitend met feiten die letterlijk uit de CONTEXT-snippets blijken.
 - Geen externe kennis of aannames.
-- Als gevraagde info niet expliciet voorkomt, zeg: 'Dit staat niet in de huidige kennisbank/context.'
+- Als gevraagde info niet expliciet voorkomt, zeg: '{$fallbackAnswer}'
 - Houd het kort en duidelijk in het Nederlands (2–4 zinnen).
 - Noem geen namen/feiten die niet in de context staan.
 - Datum van vandaag is: {$today}.";
