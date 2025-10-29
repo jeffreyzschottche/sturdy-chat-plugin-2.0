@@ -59,24 +59,33 @@ class SturdyChat_REST
             ], 400);
         }
 
+        $originalQuestion = $q;
+        $detectedLang = class_exists('SturdyChat_Language') ? SturdyChat_Language::detect($q) : 'nl';
+        $searchQuestion = $q;
+        if ($detectedLang !== 'nl' && class_exists('SturdyChat_Language')) {
+            $translated = SturdyChat_Language::translate($q, 'nl', $s, $detectedLang);
+            if ($translated !== '') {
+                $searchQuestion = $translated;
+            }
+        }
+
         // Firstly let the CPT-modules try to handle the query
-//        if (class_exists('SturdyChat_CPTs')) {
-//            $maybe = SturdyChat_CPTs::maybe_handle_query($q, $s);
-//            if (is_array($maybe) && isset($maybe['answer'])) {
-//                // Can be expanded with multiple sources, e.g. from a knowledge base
-//                return new WP_REST_Response($maybe, 200);
-//            }
-//        }
         if (class_exists('SturdyChat_CPTs')) {
-            $maybe = SturdyChat_CPTs::maybe_handle_query($q, $s);
+            $maybe = SturdyChat_CPTs::maybe_handle_query($searchQuestion, $s);
             if (is_array($maybe) && isset($maybe['answer'])) {
-//                // Paste Bron/Source under the answer
-                $answer = (string) $maybe['answer'];
+                $rawAnswer = (string) $maybe['answer'];
+                $answer = $rawAnswer;
+                if ($detectedLang !== 'nl' && class_exists('SturdyChat_Language')) {
+                    $translatedAnswer = SturdyChat_Language::translate($answer, $detectedLang, $s, 'nl');
+                    if ($translatedAnswer !== '') {
+                        $answer = $translatedAnswer;
+                    }
+                }
                 $sources = isset($maybe['sources']) && is_array($maybe['sources']) ? $maybe['sources'] : [];
                 $fallbackAnswer = (class_exists('SturdyChat_RAG') && defined('SturdyChat_RAG::FALLBACK_ANSWER'))
                     ? SturdyChat_RAG::FALLBACK_ANSWER
                     : null;
-                $isFallback = ($fallbackAnswer !== null && $answer === $fallbackAnswer);
+                $isFallback = ($fallbackAnswer !== null && $rawAnswer === $fallbackAnswer);
                 if ($isFallback) {
                     $sources = [];
                 }
@@ -90,6 +99,7 @@ class SturdyChat_REST
                         ],
                         $sources
                     ),
+                    'language' => $detectedLang,
                 ], 200);
             }
         }
@@ -97,7 +107,11 @@ class SturdyChat_REST
 
         // Fallback the Retrieval-Augmented Generation, this will check the database for relevant content
         try {
-            $out = SturdyChat_RAG::answer($q, $s);
+            $out = SturdyChat_RAG::answer($searchQuestion, $s, [], null, [
+                'answer_language' => $detectedLang,
+                'original_question' => $originalQuestion,
+                'translated_question' => $searchQuestion,
+            ]);
             if (empty($out['ok'])) {
                 return new WP_REST_Response([
                     'error' => 'chat_failed',
@@ -110,7 +124,17 @@ class SturdyChat_REST
             $fallbackAnswer = (class_exists('SturdyChat_RAG') && defined('SturdyChat_RAG::FALLBACK_ANSWER'))
                 ? SturdyChat_RAG::FALLBACK_ANSWER
                 : null;
-            $isFallback = ($fallbackAnswer !== null && $answer === $fallbackAnswer);
+            $isFallback = false;
+            if ($fallbackAnswer !== null) {
+                if (trim($answer) === trim($fallbackAnswer)) {
+                    $isFallback = true;
+                } elseif ($detectedLang !== 'nl' && class_exists('SturdyChat_Language')) {
+                    $localizedFallback = SturdyChat_Language::translate($fallbackAnswer, $detectedLang, $s, 'nl');
+                    if ($localizedFallback !== '' && trim($answer) === trim($localizedFallback)) {
+                        $isFallback = true;
+                    }
+                }
+            }
             if ($isFallback) {
                 $sources = [];
             }
@@ -124,6 +148,7 @@ class SturdyChat_REST
                     ],
                     $sources
                 ),
+                'language' => $detectedLang,
             ], 200);
 
         } catch (\Throwable $e) {

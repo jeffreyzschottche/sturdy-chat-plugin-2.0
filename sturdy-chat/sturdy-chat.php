@@ -38,6 +38,7 @@ $need = [
     'includes/Embedder.php',
     'includes/Indexer.php',
     'includes/SitemapIndexer.php',
+    'includes/Language.php',
     'includes/RAG.php',
     'includes/REST.php',
     'logic/CPT/CPTs.php',

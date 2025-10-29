@@ -20,6 +20,10 @@ class SturdyChat_RAG
     /**
      * Antwoordt op de vraag met uitsluitend context uit de index (closed-book).
      *
+     * @param array $opts Optional metadata, supports:
+     *                    - 'answer_language' (string) Target language for the final answer.
+     *                    - 'original_question' (string) Original user question before translation.
+     *                    - 'translated_question' (string) Query used for retrieval (typically Dutch).
      * @return array{
      *   ok: bool,
      *   answer?: string,
@@ -27,18 +31,34 @@ class SturdyChat_RAG
      *   message?: string
      * }
      */
-    public static function answer(string $question, array $s, array $hints = [], ?string $traceId = null): array
+    public static function answer(string $question, array $s, array $hints = [], ?string $traceId = null, array $opts = []): array
     {
         $topK = (int) ($s['top_k'] ?? 6);
         $temp = (float) ($s['temperature'] ?? 0.2);
 
+        $answerLang = strtolower((string) ($opts['answer_language'] ?? 'nl')) ?: 'nl';
+        $originalQuestion = (string) ($opts['original_question'] ?? $question);
+        $translatedQuestion = (string) ($opts['translated_question'] ?? $question);
+        if ($translatedQuestion === '') {
+            $translatedQuestion = $question;
+        }
+
         $retr = self::retrieve($question, $s, $topK, $hints, $traceId);
         $ctx  = trim((string) ($retr['context'] ?? ''));
+
+        $fallbackAnswerBase = self::FALLBACK_ANSWER;
+        $fallbackAnswerLocalized = $fallbackAnswerBase;
+        if ($answerLang !== 'nl' && class_exists('SturdyChat_Language')) {
+            $maybeTranslatedFallback = SturdyChat_Language::translate($fallbackAnswerBase, $answerLang, $s, 'nl');
+            if ($maybeTranslatedFallback !== '') {
+                $fallbackAnswerLocalized = $maybeTranslatedFallback;
+            }
+        }
 
         if ($ctx === '') {
             return [
                 'ok'      => true,
-                'answer'  => self::FALLBACK_ANSWER,
+                'answer'  => $fallbackAnswerLocalized,
                 'sources' => [],
             ];
         }
@@ -52,18 +72,38 @@ class SturdyChat_RAG
         }
 
         $today = function_exists('wp_date') ? wp_date('Y-m-d') : date_i18n('Y-m-d');
-        $fallbackAnswer = self::FALLBACK_ANSWER;
+        $languageLabel = class_exists('SturdyChat_Language')
+            ? SturdyChat_Language::languageLabel($answerLang)
+            : ucfirst($answerLang);
+        $respondIn = ($answerLang === 'nl')
+            ? 'in het Nederlands'
+            : ((in_array($answerLang, ['en','de','fr','es','it','pt','zh','ja','ko'], true)
+                ? 'in het ' . strtolower($languageLabel)
+                : 'in ' . $languageLabel));
+        $fallbackAnswer = $fallbackAnswerLocalized;
 
         $sys = "Je antwoordt uitsluitend met feiten die letterlijk uit de CONTEXT-snippets blijken.
 - Geen externe kennis of aannames.
 - Als gevraagde info niet expliciet voorkomt, zeg: '{$fallbackAnswer}'
-- Houd het kort en duidelijk in het Nederlands (2–4 zinnen).
+- Houd het kort en duidelijk {$respondIn} (2–4 zinnen).
+- Behoud Nederlandse eigennamen, paginatitels en vaste termen zoals “Vacatures” in het Nederlands.
 - Noem geen namen/feiten die niet in de context staan.
 - Datum van vandaag is: {$today}.";
 
+        if ($answerLang !== 'nl' && class_exists('SturdyChat_Language')) {
+            $originalLabel = SturdyChat_Language::languageLabel($answerLang);
+            $sys .= "\n- Het antwoord moet leesbaar zijn voor een {$originalLabel}-sprekende gebruiker.";
+        }
+
+        if ($answerLang !== 'nl' || $originalQuestion !== $translatedQuestion) {
+            $userContent = "Oorspronkelijke vraag ({$answerLang}):\n{$originalQuestion}\n\nVertaalde vraag (Nederlands):\n{$translatedQuestion}\n\nCONTEXT (snippets):\n" . $ctx;
+        } else {
+            $userContent = "VRAAG:\n" . $translatedQuestion . "\n\nCONTEXT (snippets):\n" . $ctx;
+        }
+
         $messages = [
             ['role' => 'system', 'content' => $sys],
-            ['role' => 'user',   'content' => "VRAAG:\n" . $question . "\n\nCONTEXT (snippets):\n" . $ctx],
+            ['role' => 'user',   'content' => $userContent],
         ];
 
         $res = wp_remote_post($base . '/chat/completions', [
@@ -90,11 +130,12 @@ class SturdyChat_RAG
 
         $body   = json_decode((string) wp_remote_retrieve_body($res), true);
         $answer = trim((string) ($body['choices'][0]['message']['content'] ?? ''));
+        $isFallbackAnswer = (trim($answer) === trim($fallbackAnswerLocalized));
 
         return [
             'ok'      => true,
             'answer'  => $answer,
-            'sources' => $retr['sources'],
+            'sources' => $isFallbackAnswer ? [] : $retr['sources'],
         ];
     }
 
