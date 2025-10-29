@@ -80,10 +80,6 @@ class SturdyChat_REST
                 if ($isFallback) {
                     $sources = [];
                 }
-                if (!empty($sources) && !empty($sources[0]['url']) && !$isFallback) {
-                    $answer .= "\n\nBron: " . $sources[0]['url'];
-                }
-
                 return new WP_REST_Response([
                     'answer'  => $answer,
                     'sources' => $isFallback ? [] : array_map(
@@ -118,10 +114,6 @@ class SturdyChat_REST
             if ($isFallback) {
                 $sources = [];
             }
-            if (!empty($sources) && !empty($sources[0]['url']) && !$isFallback) {
-                $answer .= "\n\nBron: " . $sources[0]['url'];
-            }
-
             return new WP_REST_Response([
                 'answer'  => $answer,
                 'sources' => $isFallback ? [] : array_map(

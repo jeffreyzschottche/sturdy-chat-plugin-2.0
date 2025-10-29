@@ -120,6 +120,7 @@ class SturdyChat_RAG
         $antiTerms   = $cons['anti_terms'];
 
         $cptHint  = self::inferCptHint($query);
+        $queryLower = mb_strtolower($query);
         $dateHint = self::parseDutchDate($query);
 
         // (2) Indexkeuze + CPT-routing (enkel sitemap)
@@ -195,7 +196,6 @@ class SturdyChat_RAG
         }
         if (!$filtered) return ['context' => '', 'sources' => []];
 
-
         // (4) Vector re-ranking + boosts
         $qvec = SturdyChat_Embedder::embed($query, $s);
         foreach ($filtered as &$row) {
@@ -214,6 +214,42 @@ class SturdyChat_RAG
             if (!empty($row['_cpt_match'])) $boost += 0.50;
             if (!empty($row['_hub']))       $boost += 0.45;
 
+            // Titel-overlap met vraagwoorden beloont exacte matches (bv. home-secties).
+            $titleBoost = 0.0;
+            $title      = mb_strtolower((string) ($row['title'] ?? ''));
+            if ($title !== '') {
+                $titleHits = 0;
+                $titleNeed = 0;
+                $seen      = [];
+                foreach ($mustTerms as $mt) {
+                    if ($mt === '') continue;
+                    if (isset($seen[$mt])) continue;
+                    $titleNeed++;
+                    if (mb_strpos($title, $mt) !== false) $titleHits++;
+                    $seen[$mt] = true;
+                }
+                foreach ($mustPhrases as $ph) {
+                    $phL = mb_strtolower($ph);
+                    if ($phL === '') continue;
+                    if (isset($seen[$phL])) continue;
+                    $titleNeed++;
+                    if (mb_strpos($title, $phL) !== false) $titleHits++;
+                    $seen[$phL] = true;
+                }
+                if ($titleNeed > 0 && $titleHits > 0) {
+                    $titleBoost = 0.35 * ($titleHits / $titleNeed);
+                }
+            }
+            $boost += $titleBoost;
+
+            if ($title !== '' && function_exists('similar_text')) {
+                $titleSimPct = 0.0;
+                similar_text($title, $queryLower, $titleSimPct);
+                if ($titleSimPct > 0) {
+                    $boost += min(0.4, ($titleSimPct / 100) * 0.4);
+                }
+            }
+
             // Datum-boost
             if (!empty($dateHint['iso']) || !empty($dateHint['text'])) {
                 $hitDate  = false;
@@ -224,7 +260,6 @@ class SturdyChat_RAG
                 if (!empty($dateHint['iso']) && $pubAt && strpos($pubAt, $dateHint['iso']) === 0)    $hitDate = true;
                 if ($hitDate) $boost += 0.15;
             }
-
             $row['final'] = (0.5 * $bm) + (0.4 * $row['cos']) + (0.1 * $cov) + (0.1 * $num) + $boost;
         }
         unset($row);
@@ -551,6 +586,8 @@ class SturdyChat_RAG
         global $wpdb;
 
         $cols = self::tableColumns($table);
+        $isSitemap     = ($table === STURDYCHAT_TABLE_SITEMAP);
+        $source        = $isSitemap ? 'sitemap' : 'wp';
         $hasCpt         = isset($cols['cpt']);
         $hasPublishedAt = isset($cols['published_at']);
         $hasTitle       = isset($cols['title']);
