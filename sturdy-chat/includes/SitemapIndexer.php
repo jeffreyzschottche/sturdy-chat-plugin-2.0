@@ -99,7 +99,7 @@ final class SturdyChat_SitemapIndexer
      * @param int $batchSize Number of URLs to process in this run.
      * @return void
      */
-    public static function workBatch(int $batchSize = 8): void
+    public static function workBatch(int $batchSize = 50): void
     {
         // Acquire a short-lived lock (e.g., 5 minutes)
         if (!self::acquireLock(300)) {

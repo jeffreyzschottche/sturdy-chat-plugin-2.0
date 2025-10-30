@@ -42,9 +42,9 @@ $need = [
     'includes/RAG.php',
     'includes/REST.php',
     'includes/Cache.php',
-    'logic/CPT/CPTs.php',
-    'logic/CPT/Jobs.php',
-    'logic/CPT/Posts.php',
+    'CustomLogic/CustomLogic.php',
+    'CustomLogic/Jobs.php',
+    'CustomLogic/Posts.php',
 ];
 foreach ($need as $rel) {
     $abs = STURDYCHAT_DIR . $rel;
@@ -57,7 +57,7 @@ add_action('sturdychat_sitemap_worker', function (): void {
     if (!class_exists('SturdyChat_SitemapIndexer')) {
         return;
     }
-    SturdyChat_SitemapIndexer::workBatch(8); // tune batch size (e.g., 5–10)
+    SturdyChat_SitemapIndexer::workBatch(50); // tune batch size (e.g., 5–10)
 });
 
 /**
@@ -86,6 +86,80 @@ function sturdychat_all_public_types(): array
     unset($names['attachment']);
     return array_values($names);
 }
+
+/**
+ * Processes the sitemap queue immediately by repeatedly running the worker until it is empty.
+ *
+ * @param int $batchSize Number of URLs to process per worker run.
+ * @return void
+ */
+function sturdychat_process_sitemap_queue_until_complete(int $batchSize = 50): void
+{
+    if (!class_exists('SturdyChat_SitemapIndexer')) {
+        return;
+    }
+
+    $maxIterations = 200; // Safety guard: 200 * 50 = 10k URLs.
+    for ($i = 0; $i < $maxIterations; $i++) {
+        $total = (int) get_option('sturdychat_sitemap_queue_total', 0);
+        $pos   = (int) get_option('sturdychat_sitemap_queue_pos', 0);
+
+        if ($total <= 0 || $pos >= $total) {
+            break;
+        }
+
+        $before = $pos;
+        SturdyChat_SitemapIndexer::workBatch($batchSize);
+        $after = (int) get_option('sturdychat_sitemap_queue_pos', 0);
+
+        // No progress (e.g. lock contention or error) — stop looping.
+        if ($after <= $before) {
+            break;
+        }
+    }
+}
+
+/**
+ * Automatically triggers sitemap indexing whenever a public post is saved.
+ *
+ * @param int     $post_id The post ID being saved.
+ * @param WP_Post $post    The post object.
+ * @param bool    $update  Whether this is an existing post being updated.
+ * @return void
+ */
+function sturdychat_trigger_sitemap_index_on_save(int $post_id, $post, bool $update): void
+{
+    if (!class_exists('SturdyChat_SitemapIndexer')) {
+        return;
+    }
+
+    if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
+        return;
+    }
+    if (wp_is_post_autosave($post_id) || wp_is_post_revision($post_id)) {
+        return;
+    }
+
+    if (!$post instanceof WP_Post) {
+        $post = get_post($post_id);
+        if (!$post instanceof WP_Post) {
+            return;
+        }
+    }
+
+    // Only trigger for published (or scheduled) content.
+    if (!in_array($post->post_status, ['publish', 'future'], true)) {
+        return;
+    }
+
+    $settings = get_option('sturdychat_settings', []);
+    $queued = SturdyChat_SitemapIndexer::indexAll($settings);
+
+    if (!empty($queued['ok'])) {
+        sturdychat_process_sitemap_queue_until_complete(50);
+    }
+}
+add_action('save_post', 'sturdychat_trigger_sitemap_index_on_save', 20, 3);
 
 if (class_exists('SturdyChat_CPTs')) {
     SturdyChat_CPTs::init();
