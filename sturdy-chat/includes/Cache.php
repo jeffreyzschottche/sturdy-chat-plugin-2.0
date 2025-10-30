@@ -116,6 +116,118 @@ class SturdyChat_Cache
         }
     }
 
+    /**
+     * Provide normalized question and hash for reuse outside the cache class.
+     *
+     * @return array{normalized:string,hash:string}
+     */
+    public static function normalizeForStorage(string $question): array
+    {
+        $normalized = self::normalizeQuestion($question);
+
+        if ($normalized === '') {
+            return ['normalized' => '', 'hash' => ''];
+        }
+
+        return [
+            'normalized' => $normalized,
+            'hash'       => self::hashNormalized($normalized),
+        ];
+    }
+
+    /**
+     * Sanitize raw JSON input from the editor and return a normalized JSON string for storage.
+     *
+     * @return array{ok:bool,value:string,message?:string}
+     */
+    public static function normalizeSourcesInput(string $raw): array
+    {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return ['ok' => true, 'value' => ''];
+        }
+
+        $decoded = json_decode($raw, true);
+
+        if (!is_array($decoded)) {
+            $error = 'JSON decode error';
+            if (function_exists('json_last_error_msg')) {
+                $error = json_last_error_msg();
+            }
+            return [
+                'ok'      => false,
+                'value'   => '',
+                'message' => sprintf(__('Invalid sources JSON: %s', 'sturdychat-chatbot'), $error),
+            ];
+        }
+
+        $normalized = [];
+        foreach ($decoded as $src) {
+            if (!is_array($src)) {
+                continue;
+            }
+
+            $item = [
+                'title' => (string) ($src['title'] ?? ''),
+                'url'   => (string) ($src['url'] ?? ''),
+                'score' => isset($src['score']) ? (float) $src['score'] : 0.0,
+            ];
+
+            if ($item['title'] === '' && $item['url'] === '' && 0.0 === $item['score']) {
+                continue;
+            }
+
+            $normalized[] = $item;
+        }
+
+        if (!$normalized) {
+            return ['ok' => true, 'value' => ''];
+        }
+
+        $flags = 0;
+        if (defined('JSON_UNESCAPED_SLASHES')) {
+            $flags |= JSON_UNESCAPED_SLASHES;
+        }
+        if (defined('JSON_UNESCAPED_UNICODE')) {
+            $flags |= JSON_UNESCAPED_UNICODE;
+        }
+        if (defined('JSON_PRETTY_PRINT')) {
+            $flags |= JSON_PRETTY_PRINT;
+        }
+
+        $json = function_exists('wp_json_encode')
+            ? wp_json_encode($normalized, $flags)
+            : json_encode($normalized, $flags);
+
+        if (!is_string($json)) {
+            return [
+                'ok'      => false,
+                'value'   => '',
+                'message' => __('Unable to encode sources as JSON.', 'sturdychat-chatbot'),
+            ];
+        }
+
+        return ['ok' => true, 'value' => $json];
+    }
+
+    /**
+     * Pretty print sources JSON for the admin editor.
+     */
+    public static function formatSourcesForEditor(string $sources): string
+    {
+        $sources = trim($sources);
+        if ($sources === '') {
+            return '';
+        }
+
+        $result = self::normalizeSourcesInput($sources);
+        if ($result['ok']) {
+            return $result['value'];
+        }
+
+        return $sources;
+    }
+
     private static function normalizeQuestion(string $question): string
     {
         $question = wp_strip_all_tags($question);
