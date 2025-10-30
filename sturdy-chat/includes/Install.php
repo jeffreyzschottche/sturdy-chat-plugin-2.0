@@ -14,7 +14,8 @@ class SturdyChat_Install
         global $wpdb;
         $t1 = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", STURDYCHAT_TABLE));
         $t2 = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", STURDYCHAT_TABLE_SITEMAP));
-        return (bool)($t1 && $t2);
+        $t3 = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", STURDYCHAT_TABLE_CACHE));
+        return (bool)($t1 && $t2 && $t3);
     }
 
     /**
@@ -65,7 +66,21 @@ class SturdyChat_Install
             FULLTEXT KEY content_ft (content)
         ) $charset;";
 
+        $sql3 = "CREATE TABLE " . STURDYCHAT_TABLE_CACHE . " (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            question TEXT NOT NULL,
+            normalized_question TEXT NOT NULL,
+            normalized_hash CHAR(64) NOT NULL,
+            answer LONGTEXT NOT NULL,
+            sources LONGTEXT NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY normalized_hash (normalized_hash),
+            KEY created_at (created_at)
+        ) $charset;";
+
         dbDelta($sql1);
         dbDelta($sql2);
+        dbDelta($sql3);
     }
 }

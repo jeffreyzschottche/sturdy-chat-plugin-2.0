@@ -59,6 +59,13 @@ class SturdyChat_REST
             ], 400);
         }
 
+        if (class_exists('SturdyChat_Cache')) {
+            $cached = SturdyChat_Cache::find($q);
+            if (is_array($cached) && isset($cached['answer'])) {
+                return new WP_REST_Response($cached, 200);
+            }
+        }
+
         // Firstly let the CPT-modules try to handle the query
 //        if (class_exists('SturdyChat_CPTs')) {
 //            $maybe = SturdyChat_CPTs::maybe_handle_query($q, $s);
@@ -79,6 +86,9 @@ class SturdyChat_REST
                 $isFallback = ($fallbackAnswer !== null && $answer === $fallbackAnswer);
                 if ($isFallback) {
                     $sources = [];
+                }
+                if (class_exists('SturdyChat_Cache')) {
+                    SturdyChat_Cache::store($q, $answer, $sources);
                 }
                 return new WP_REST_Response([
                     'answer'  => $answer,
@@ -113,6 +123,9 @@ class SturdyChat_REST
             $isFallback = ($fallbackAnswer !== null && $answer === $fallbackAnswer);
             if ($isFallback) {
                 $sources = [];
+            }
+            if (class_exists('SturdyChat_Cache')) {
+                SturdyChat_Cache::store($q, $answer, $sources);
             }
             return new WP_REST_Response([
                 'answer'  => $answer,

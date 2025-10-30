@@ -21,6 +21,7 @@ global $wpdb;
 // DB Table for vector embedded chunks
 define('STURDYCHAT_TABLE', $wpdb->prefix . 'sturdychat_chunks');
 define('STURDYCHAT_TABLE_SITEMAP', $wpdb->prefix . 'sturdychat_chunks_sitemap');
+define('STURDYCHAT_TABLE_CACHE', $wpdb->prefix . 'sturdychat_cached_answers');
 
 add_filter('sturdychat_sitemap_sslverify', function($verify) {
     $host = wp_parse_url(home_url(), PHP_URL_HOST) ?: '';
@@ -40,6 +41,7 @@ $need = [
     'includes/SitemapIndexer.php',
     'includes/RAG.php',
     'includes/REST.php',
+    'includes/Cache.php',
     'logic/CPT/CPTs.php',
     'logic/CPT/Jobs.php',
     'logic/CPT/Posts.php',
