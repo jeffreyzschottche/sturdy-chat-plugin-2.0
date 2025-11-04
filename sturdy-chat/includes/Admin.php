@@ -343,7 +343,20 @@ class SturdyChat_Admin
             return;
         }
 
-        $indexUrl = wp_nonce_url(admin_url('admin-post.php?action=sturdychat_index_sitemap'), 'sturdychat_index_sitemap');
+        $indexUrl  = wp_nonce_url(admin_url('admin-post.php?action=sturdychat_index_sitemap'), 'sturdychat_index_sitemap');
+        $searchUrl = wp_nonce_url(admin_url('admin-post.php?action=sturdychat_list_unindexed'), 'sturdychat_list_unindexed');
+
+        $unindexedUrls    = (array) get_option('sturdychat_unindexed_urls', []);
+        $unindexedMessage = (string) get_option('sturdychat_unindexed_message', '');
+        $skippedUrls      = [];
+        foreach ((array) get_option('sturdychat_skipped_sitemap_urls', []) as $skip) {
+            $clean = esc_url_raw((string) $skip);
+            if ($clean !== '') {
+                $skippedUrls[] = $clean;
+            }
+        }
+        $skippedUrls = array_values(array_unique($skippedUrls));
+        $skipAction  = admin_url('admin-post.php');
 
         echo '<div class="wrap"><h1>Sturdy Chat (Self-Hosted RAG)</h1>';
 
@@ -354,7 +367,53 @@ class SturdyChat_Admin
         echo '<div class="card" style="max-width:600px;margin-bottom:20px;">';
         echo '<h2>' . esc_html__('Index sitemap', 'sturdychat-chatbot') . '</h2>';
         echo '<p>' . esc_html__('Crawl the configured sitemap and refresh the vector index used for retrieval.', 'sturdychat-chatbot') . '</p>';
-        echo '<p><a class="button button-primary" href="' . esc_url($indexUrl) . '">' . esc_html__('Start indexing', 'sturdychat-chatbot') . '</a></p>';
+        echo '<p>';
+        echo '<a class="button" style="margin-right:8px;" href="' . esc_url($searchUrl) . '">' . esc_html__('Search unindexed sitemap', 'sturdychat-chatbot') . '</a>';
+        echo '<a class="button button-primary" href="' . esc_url($indexUrl) . '">' . esc_html__('Index / vector embed', 'sturdychat-chatbot') . '</a>';
+        echo '</p>';
+
+        if ($unindexedMessage !== '') {
+            echo '<p><em>' . esc_html($unindexedMessage) . '</em></p>';
+        }
+
+        if (!empty($unindexedUrls)) {
+            $joined = implode("\n", array_map('esc_url_raw', $unindexedUrls));
+            echo '<p><textarea rows="10" class="large-text code" readonly>' . esc_textarea($joined) . '</textarea></p>';
+            echo '<form method="post" action="' . esc_url($skipAction) . '" style="margin-top:12px;">';
+            echo '<input type="hidden" name="action" value="sturdychat_skip_unindexed" />';
+            echo '<input type="hidden" name="mode" value="skip" />';
+            wp_nonce_field('sturdychat_skip_unindexed');
+            echo '<p>' . esc_html__('Select the URLs you want to ignore for future indexing runs.', 'sturdychat-chatbot') . '</p>';
+            echo '<ul class="ul-disc" style="max-height:220px;overflow:auto;padding-left:20px;">';
+            foreach ($unindexedUrls as $url) {
+                $clean = esc_url_raw((string) $url);
+                if ($clean === '') {
+                    continue;
+                }
+                echo '<li><label><input type="checkbox" name="skip_urls[]" value="' . esc_attr($clean) . '" /> ' . esc_html($clean) . '</label></li>';
+            }
+            echo '</ul>';
+            submit_button(__('Ignore selected URLs', 'sturdychat-chatbot'), 'secondary', 'submit', false);
+            echo '</form>';
+        }
+
+        if (!empty($skippedUrls)) {
+            echo '<hr />';
+            echo '<h3>' . esc_html__('Ignored sitemap URLs', 'sturdychat-chatbot') . '</h3>';
+            echo '<p>' . esc_html__('These URLs are skipped when you search for unindexed sitemap entries.', 'sturdychat-chatbot') . '</p>';
+            echo '<form method="post" action="' . esc_url($skipAction) . '" style="margin-top:12px;">';
+            echo '<input type="hidden" name="action" value="sturdychat_skip_unindexed" />';
+            echo '<input type="hidden" name="mode" value="restore" />';
+            wp_nonce_field('sturdychat_skip_unindexed');
+            echo '<ul class="ul-disc" style="max-height:220px;overflow:auto;padding-left:20px;">';
+            foreach ($skippedUrls as $url) {
+                echo '<li><label><input type="checkbox" name="skip_urls[]" value="' . esc_attr($url) . '" /> ' . esc_html($url) . '</label></li>';
+            }
+            echo '</ul>';
+            submit_button(__('Stop ignoring selected URLs', 'sturdychat-chatbot'), 'secondary', 'submit', false);
+            echo '</form>';
+        }
+
         echo '</div>';
 
         echo '<form method="post" action="options.php">';
@@ -815,12 +874,133 @@ class SturdyChat_Admin
 
         check_admin_referer('sturdychat_index_sitemap');
 
+        delete_option('sturdychat_unindexed_urls');
+        delete_option('sturdychat_unindexed_message');
+
         $s   = get_option('sturdychat_settings', []);
         $res = SturdyChat_SitemapIndexer::indexAll($s);
 
         $msg = $res['ok'] ? $res['message'] : ('Failed: ' . $res['message']);
         wp_safe_redirect(add_query_arg(
             ['page' => 'sturdychat', 'msg' => rawurlencode($msg)],
+            admin_url('admin.php')
+        ));
+        exit;
+    }
+
+    /**
+     * Handles the admin-post action for listing unindexed sitemap URLs.
+     */
+    public static function handleListUnindexed(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('Forbidden');
+        }
+
+        check_admin_referer('sturdychat_list_unindexed');
+
+        $s   = get_option('sturdychat_settings', []);
+        $res = SturdyChat_SitemapIndexer::findUnindexedUrls($s);
+
+        if ($res['ok'] && !empty($res['urls'])) {
+            update_option('sturdychat_unindexed_urls', array_values($res['urls']), false);
+        } else {
+            delete_option('sturdychat_unindexed_urls');
+        }
+
+        update_option('sturdychat_unindexed_message', $res['message'] ?? '', false);
+
+        $msg = $res['message'] ?? '';
+
+        wp_safe_redirect(add_query_arg(
+            ['page' => 'sturdychat', 'msg' => rawurlencode($msg)],
+            admin_url('admin.php')
+        ));
+        exit;
+    }
+
+    /**
+     * Handles skipping or restoring sitemap URLs from the "unindexed" suggestions list.
+     */
+    public static function handleSkipUnindexed(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('Forbidden');
+        }
+
+        check_admin_referer('sturdychat_skip_unindexed');
+
+        $mode      = isset($_POST['mode']) ? sanitize_key((string) wp_unslash($_POST['mode'])) : 'skip';
+        $rawSelect = isset($_POST['skip_urls']) ? (array) wp_unslash($_POST['skip_urls']) : [];
+
+        $selected = [];
+        foreach ($rawSelect as $url) {
+            $clean = esc_url_raw((string) $url);
+            if ($clean !== '') {
+                $selected[] = $clean;
+            }
+        }
+        $selected = array_values(array_unique($selected));
+
+        $existingSkip = [];
+        foreach ((array) get_option('sturdychat_skipped_sitemap_urls', []) as $url) {
+            $clean = esc_url_raw((string) $url);
+            if ($clean !== '') {
+                $existingSkip[] = $clean;
+            }
+        }
+        $existingSkip = array_values(array_unique($existingSkip));
+
+        $count   = count($selected);
+        $message = '';
+
+        if ($mode === 'restore') {
+            if ($count > 0) {
+                $updated = array_values(array_diff($existingSkip, $selected));
+                if (empty($updated)) {
+                    delete_option('sturdychat_skipped_sitemap_urls');
+                } else {
+                    update_option('sturdychat_skipped_sitemap_urls', $updated, false);
+                }
+
+                $message = sprintf(
+                    _n('One URL has been restored to the indexing queue.', '%d URLs have been restored to the indexing queue.', $count, 'sturdychat-chatbot'),
+                    $count
+                );
+            } else {
+                $message = __('No URL selected.', 'sturdychat-chatbot');
+            }
+        } else {
+            if ($count > 0) {
+                $merged = array_values(array_unique(array_merge($existingSkip, $selected)));
+                update_option('sturdychat_skipped_sitemap_urls', $merged, false);
+
+                $pending = [];
+                foreach ((array) get_option('sturdychat_unindexed_urls', []) as $url) {
+                    $clean = esc_url_raw((string) $url);
+                    if ($clean !== '' && !in_array($clean, $selected, true)) {
+                        $pending[] = $clean;
+                    }
+                }
+                if (!empty($pending)) {
+                    update_option('sturdychat_unindexed_urls', array_values(array_unique($pending)), false);
+                } else {
+                    delete_option('sturdychat_unindexed_urls');
+                }
+
+                $message = sprintf(
+                    _n('One URL ignored.', '%d URLs ignored.', $count, 'sturdychat-chatbot'),
+                    $count
+                );
+            } else {
+                $message = __('No URL selected.', 'sturdychat-chatbot');
+            }
+        }
+
+        update_option('sturdychat_unindexed_message', $message, false);
+
+        wp_safe_redirect(add_query_arg(
+            ['page' => 'sturdychat', 'msg' => rawurlencode($message)],
             admin_url('admin.php')
         ));
         exit;
