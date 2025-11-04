@@ -31,7 +31,11 @@ final class SturdyChat_SitemapIndexer
 
         $childSitemaps = self::fetchSitemapIndex($root);
         if (empty($childSitemaps)) {
-            return ['ok' => false, 'message' => 'No child sitemaps parsed at ' . $root . '.'];
+            return [
+                'ok'      => false,
+                'message' => 'No child sitemaps parsed at ' . $root . '.',
+                'queued'  => 0,
+            ];
         }
 
         $urls = [];
@@ -46,7 +50,11 @@ final class SturdyChat_SitemapIndexer
         }
         $urls = array_values(array_unique($urls));
         if (empty($urls)) {
-            return ['ok' => false, 'message' => 'Child sitemaps had no URLs.'];
+            return [
+                'ok'      => false,
+                'message' => 'Child sitemaps had no URLs.',
+                'queued'  => 0,
+            ];
         }
 
         // Skip URLs that are already indexed in the sitemap chunk table.
@@ -71,7 +79,11 @@ final class SturdyChat_SitemapIndexer
             delete_option(self::OPT_QUEUE);
             delete_option(self::OPT_POS);
             delete_option(self::OPT_TOTAL);
-            return ['ok' => true, 'message' => 'Sitemap already indexed. No new URLs found.'];
+            return [
+                'ok'      => true,
+                'message' => 'Sitemap already indexed. No new URLs found.',
+                'queued'  => 0,
+            ];
         }
 
         // (Re)queue and reset pointer
@@ -82,7 +94,138 @@ final class SturdyChat_SitemapIndexer
         if (function_exists('sturdychat_schedule_sitemap_worker')) {
             sturdychat_schedule_sitemap_worker();
         }
-        return ['ok' => true, 'message' => 'Queued ' . count($urls) . ' new URLs for background indexing.'];
+        return [
+            'ok'      => true,
+            'message' => 'Queued ' . count($urls) . ' new URLs for background indexing.',
+            'queued'  => count($urls),
+        ];
+    }
+
+    /**
+     * Drain the sitemap queue synchronously by taking the worker lock and processing batches until empty.
+     *
+     * @param int $batchSize        Number of URLs to process per batch.
+     * @param int $lockWaitSeconds  How long to wait for the queue lock before giving up.
+     * @return array{ran:bool,processed:int,total:int,remaining:int}
+     */
+    public static function drainQueueSynchronously(int $batchSize = 25, int $lockWaitSeconds = 15): array
+    {
+        $queue = get_option(self::OPT_QUEUE, null);
+        if (!is_array($queue) || empty($queue)) {
+            return [
+                'ran'       => false,
+                'processed' => 0,
+                'total'     => 0,
+                'remaining' => 0,
+            ];
+        }
+
+        $total = (int) get_option(self::OPT_TOTAL, 0);
+        if ($total <= 0) {
+            $total = count($queue);
+            update_option(self::OPT_TOTAL, $total, false);
+        }
+
+        $processed = max(0, min((int) get_option(self::OPT_POS, 0), $total));
+        $remaining = max(0, $total - $processed);
+
+        $lockWaitSeconds = max(0, (int) $lockWaitSeconds);
+        if ($remaining > 0 && !self::acquireLockBlocking(300, $lockWaitSeconds)) {
+            return [
+                'ran'       => false,
+                'processed' => $processed,
+                'total'     => $total,
+                'remaining' => $remaining,
+            ];
+        }
+
+        $batchSize   = max(1, (int) $batchSize);
+        $iterations  = 0;
+        $stallCycles = 0;
+
+        try {
+            do {
+                $pass = self::advanceQueue($batchSize, false);
+                $iterations++;
+
+                if (isset($pass['total']) && $pass['total'] > 0) {
+                    $total = (int) $pass['total'];
+                }
+
+                if (isset($pass['pos'])) {
+                    $processed = max(0, min((int) $pass['pos'], $total));
+                } else {
+                    $processed = max(0, min((int) get_option(self::OPT_POS, 0), $total));
+                }
+
+                $remaining = max(0, $total - $processed);
+
+                if (!empty($pass['done'])) {
+                    break;
+                }
+
+                if (($pass['processed_this_pass'] ?? 0) <= 0) {
+                    $stallCycles++;
+                    if ($stallCycles >= 5) {
+                        break;
+                    }
+                    usleep(200000);
+                } else {
+                    $stallCycles = 0;
+                }
+            } while ($remaining > 0 && $iterations < 1000);
+        } finally {
+            self::releaseLock();
+        }
+
+        $queue = get_option(self::OPT_QUEUE, null);
+        if (!is_array($queue) || empty($queue)) {
+            $processed = $total;
+            $remaining = 0;
+            if (function_exists('wp_clear_scheduled_hook')) {
+                wp_clear_scheduled_hook('sturdychat_sitemap_worker');
+            }
+        }
+
+        return [
+            'ran'       => true,
+            'processed' => $processed,
+            'total'     => $total,
+            'remaining' => $remaining,
+        ];
+    }
+
+    /**
+     * Inspect the sitemap queue without mutating it.
+     *
+     * @return array{total:int,processed:int,remaining:int}
+     */
+    public static function getQueueSnapshot(): array
+    {
+        $queue = get_option(self::OPT_QUEUE, null);
+        if (!is_array($queue) || empty($queue)) {
+            return [
+                'total'     => 0,
+                'processed' => 0,
+                'remaining' => 0,
+            ];
+        }
+
+        $total = (int) get_option(self::OPT_TOTAL, 0);
+        if ($total <= 0) {
+            $total = count($queue);
+        }
+
+        $pos = (int) get_option(self::OPT_POS, 0);
+        $pos = max(0, min($pos, $total));
+
+        $remaining = max(0, $total - $pos);
+
+        return [
+            'total'     => $total,
+            'processed' => $pos,
+            'remaining' => $remaining,
+        ];
     }
 
     /**
@@ -101,84 +244,105 @@ final class SturdyChat_SitemapIndexer
      */
     public static function workBatch(int $batchSize = 50): void
     {
-        // Acquire a short-lived lock (e.g., 5 minutes)
         if (!self::acquireLock(300)) {
             return;
         }
 
         try {
-            $settings = get_option('sturdychat_settings', []);
-            $queue    = (array) get_option(self::OPT_QUEUE, []);
-            $total    = (int) get_option(self::OPT_TOTAL, 0);
-            $pos      = (int) get_option(self::OPT_POS, 0);
-
-            // Initialize total the first time if missing
-            if ($total <= 0) {
-                $total = count($queue);
-                update_option(self::OPT_TOTAL, $total, false);
-            }
-
-            // Nothing to do / already finished
-            if ($pos >= $total || $pos >= count($queue)) {
-                delete_option(self::OPT_QUEUE);
-                delete_option(self::OPT_POS);
-                delete_option(self::OPT_TOTAL);
-                update_option('sturdychat_sitemap_last_done', current_time('mysql'), false);
-                return;
-            }
-
-            // Compute slice and process
-            $batchSize = max(1, (int) $batchSize);
-            $slice     = array_slice($queue, $pos, $batchSize);
-
-            foreach ($slice as $url) {
-                try {
-                    // Your existing single-URL pipeline:
-                    // - fetch HTML
-                    // - extract title/content/json-ld/dates
-                    // - chunk content
-                    // - compute content_hash
-                    // - skip if unchanged
-                    // - else: embed & insert rows into STURDYCHAT_TABLE_SITEMAP
-                    self::indexOneUrl((string) $url, $settings);
-                } catch (\Throwable $e) {
-                    error_log('[SturdyChat] sitemap index error ' . $url . ': ' . $e->getMessage());
-                    // Optional: keep a rolling last_error for debugging
-                    update_option('sturdychat_sitemap_last_error', '[' . current_time('mysql') . '] ' . $url . ' :: ' . $e->getMessage(), false);
-                }
-
-                // Advance pointer and persist progress each URL
-                $pos++;
-                update_option(self::OPT_POS, $pos, false);
-
-                // Gentle throttle between requests (filterable)
-                $sleepUs = (int) apply_filters('sturdychat_sitemap_usleep_between', 150000); // 150ms
-                if ($sleepUs > 0) {
-                    usleep($sleepUs);
-                }
-            }
-
-            // More work left? Reschedule a single event shortly.
-            if ($pos < $total && $pos < count($queue)) {
-                if (function_exists('sturdychat_schedule_sitemap_worker')) {
-                    // If you have a helper, allow a delay parameter (default 60s)
-                    sturdychat_schedule_sitemap_worker(60);
-                } else {
-                    // Fallback: schedule directly if not already queued
-                    if (!wp_next_scheduled('sturdychat_sitemap_worker')) {
-                        wp_schedule_single_event(time() + 60, 'sturdychat_sitemap_worker');
-                    }
-                }
-            } else {
-                // Done: clean up and mark completion
-                delete_option(self::OPT_QUEUE);
-                delete_option(self::OPT_POS);
-                delete_option(self::OPT_TOTAL);
-                update_option('sturdychat_sitemap_last_done', current_time('mysql'), false);
-            }
+            self::advanceQueue($batchSize, true);
         } finally {
             self::releaseLock();
         }
+    }
+
+    private static function advanceQueue(int $batchSize, bool $rescheduleOnRemain): array
+    {
+        $settings = get_option('sturdychat_settings', []);
+        $queue    = (array) get_option(self::OPT_QUEUE, []);
+        $total    = (int) get_option(self::OPT_TOTAL, 0);
+        $pos      = (int) get_option(self::OPT_POS, 0);
+
+        $queueCount = count($queue);
+        if ($total <= 0) {
+            $total = $queueCount;
+            update_option(self::OPT_TOTAL, $total, false);
+        }
+
+        // Normalize bounds so progress/remaining calculations stay consistent.
+        $total        = max(0, (int) $total);
+        $pos          = max(0, min($pos, $total > 0 ? $total : $queueCount));
+        $batchSize    = max(1, (int) $batchSize);
+        $processedNow = 0;
+
+        if ($pos >= $total || $pos >= $queueCount) {
+            self::finalizeQueue($total);
+            return [
+                'processed_this_pass' => 0,
+                'pos'                 => $total,
+                'total'               => $total,
+                'remaining'           => 0,
+                'done'                => true,
+            ];
+        }
+
+        $slice = array_slice($queue, $pos, $batchSize);
+        foreach ($slice as $url) {
+            try {
+                self::indexOneUrl((string) $url, $settings);
+            } catch (\Throwable $e) {
+                error_log('[SturdyChat] sitemap index error ' . $url . ': ' . $e->getMessage());
+                update_option('sturdychat_sitemap_last_error', '[' . current_time('mysql') . '] ' . $url . ' :: ' . $e->getMessage(), false);
+            }
+
+            $pos++;
+            $processedNow++;
+            update_option(self::OPT_POS, $pos, false);
+
+            $sleepUs = (int) apply_filters('sturdychat_sitemap_usleep_between', 150000);
+            if ($sleepUs > 0) {
+                usleep($sleepUs);
+            }
+        }
+
+        $normalizedPos = max(0, min($pos, $total > 0 ? $total : $queueCount));
+        $remaining     = max(0, ($total > 0 ? $total : $queueCount) - $normalizedPos);
+
+        if ($remaining <= 0) {
+            self::finalizeQueue($total);
+            return [
+                'processed_this_pass' => $processedNow,
+                'pos'                 => $total,
+                'total'               => $total,
+                'remaining'           => 0,
+                'done'                => true,
+            ];
+        }
+
+        if ($rescheduleOnRemain) {
+            if (function_exists('sturdychat_schedule_sitemap_worker')) {
+                sturdychat_schedule_sitemap_worker(60);
+            } else {
+                if (!wp_next_scheduled('sturdychat_sitemap_worker')) {
+                    wp_schedule_single_event(time() + 60, 'sturdychat_sitemap_worker');
+                }
+            }
+        }
+
+        return [
+            'processed_this_pass' => $processedNow,
+            'pos'                 => $normalizedPos,
+            'total'               => $total,
+            'remaining'           => $remaining,
+            'done'                => false,
+        ];
+    }
+
+    private static function finalizeQueue(int $total): void
+    {
+        delete_option(self::OPT_QUEUE);
+        delete_option(self::OPT_POS);
+        delete_option(self::OPT_TOTAL);
+        update_option('sturdychat_sitemap_last_done', current_time('mysql'), false);
     }
 
 //    public static function workBatch(int $batchSize = 8): void
@@ -232,6 +396,21 @@ final class SturdyChat_SitemapIndexer
         }
         set_transient(self::LOCK_KEY, 1, $ttl);
         return true;
+    }
+
+    private static function acquireLockBlocking(int $ttl, int $waitSeconds): bool
+    {
+        $deadline = microtime(true) + max(0, $waitSeconds);
+
+        do {
+            if (self::acquireLock($ttl)) {
+                return true;
+            }
+
+            usleep(200000);
+        } while (microtime(true) < $deadline);
+
+        return false;
     }
 
     private static function releaseLock(): void
