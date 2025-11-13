@@ -42,18 +42,10 @@ class SturdyChat_CPTs
     {
         // Load all CPT modules
         // Possible to add require or dynamically *.php files
-//        if (!class_exists('SturdyChat_CPT_Jobs')) {
-//            require_once STURDYCHAT_DIR . 'CustomLogic/Jobs.php';
-//        }
-        // if (!class_exists('SturdyChat_CPT_Posts')) {
-        //     require_once STURDYCHAT_DIR . 'CustomLogic/Posts.php';
-        // }
-//        if (!class_exists('SturdyChat_CPT_Traineeships')) {
-//            require_once STURDYCHAT_DIR . 'CustomLogic/Traineeships.php';
-//        }
-//        self::register(new SturdyChat_CPT_Jobs());
-        // self::register(new SturdyChat_CPT_Posts());
-//        self::register(new SturdyChat_CPT_Traineeships());
+        if (!class_exists('SturdyChat_CPT_Jobs')) {
+            require_once STURDYCHAT_DIR . 'CustomLogic/Jobs.php';
+        }
+        self::register(new SturdyChat_CPT_Jobs());
     }
 
     public static function register(SturdyChat_CPT_Module $m): void
@@ -95,4 +87,3 @@ class SturdyChat_CPTs
         return null;
     }
 }
-
