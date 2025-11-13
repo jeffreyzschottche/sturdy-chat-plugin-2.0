@@ -152,11 +152,23 @@ function sturdychat_trigger_sitemap_index_on_save(int $post_id, $post, bool $upd
         return;
     }
 
-    $settings = get_option('sturdychat_settings', []);
-    $queued = SturdyChat_SitemapIndexer::indexAll($settings);
+    $permalink = get_permalink($post);
+    if (!$permalink || is_wp_error($permalink)) {
+        return;
+    }
 
-    if (!empty($queued['ok'])) {
-        sturdychat_process_sitemap_queue_until_complete(50);
+    $targets = sturdychat_collect_post_url_targets($post);
+    $urls    = $targets['urls'];
+    if (empty($urls)) {
+        $urls = [$permalink];
+    }
+
+    $settings = get_option('sturdychat_settings', []);
+
+    try {
+        SturdyChat_SitemapIndexer::indexSingleUrl($permalink, $settings, true, $urls);
+    } catch (\Throwable $e) {
+        error_log('[SturdyChat] Failed to index ' . $permalink . ': ' . $e->getMessage());
     }
 }
 add_action('save_post', 'sturdychat_trigger_sitemap_index_on_save', 20, 3);

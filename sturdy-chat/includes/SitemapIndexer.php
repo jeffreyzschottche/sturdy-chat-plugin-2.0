@@ -86,6 +86,40 @@ final class SturdyChat_SitemapIndexer
     }
 
     /**
+     * Index a single URL immediately (typically when a post is saved).
+     *
+     * @param string $url              Canonical URL that should be indexed.
+     * @param array  $settings         Plugin settings (for embeddings/chunk size).
+     * @param bool   $force            When true we always reinsert chunks even if the hash matches.
+     * @param array  $knownUrlVariants Additional URL variants (http/https, sample links, etc.) that should be purged before inserting fresh chunks.
+     * @return bool|null
+     */
+    public static function indexSingleUrl(string $url, array $settings, bool $force = false, array $knownUrlVariants = []): ?bool
+    {
+        $url = trim($url);
+        if ($url === '') {
+            return null;
+        }
+
+        $variants = [];
+        foreach ($knownUrlVariants as $variant) {
+            if (!is_string($variant)) {
+                continue;
+            }
+            $variant = trim($variant);
+            if ($variant === '') {
+                continue;
+            }
+            $variants[$variant] = true;
+        }
+        if (!isset($variants[$url])) {
+            $variants[$url] = true;
+        }
+
+        return self::indexUrl($url, null, $settings, $force, array_keys($variants));
+    }
+
+    /**
      * Cron worker: process a small batch each run. Automatically re-schedules until done.
      */
     /**
@@ -460,9 +494,11 @@ final class SturdyChat_SitemapIndexer
      * @param string      $url
      * @param string|null $lastmod
      * @param array       $s
+     * @param bool        $force       Whether to reinsert even if the stored hash matches.
+     * @param array       $deleteUrls  Optional list of URL variants that should be purged before inserting fresh rows.
      * @return bool|null true=inserted, null=skipped (unchanged/no content), false=error
      */
-    private static function indexUrl(string $url, ?string $lastmod, array $s): ?bool
+    private static function indexUrl(string $url, ?string $lastmod, array $s, bool $force = false, array $deleteUrls = []): ?bool
     {
         $res = wp_remote_get($url, [
             'timeout'     => 30,
@@ -572,7 +608,7 @@ final class SturdyChat_SitemapIndexer
             "SELECT cpt, content_hash FROM {$table} WHERE url = %s LIMIT 1",
             $url
         ), ARRAY_A);
-        if ($existingRow) {
+        if ($existingRow && !$force) {
             $existingHash = (string) ($existingRow['content_hash'] ?? '');
             $existingCpt  = sanitize_key((string) ($existingRow['cpt'] ?? ''));
             if ($existingHash === $hash && $existingCpt === $cpt) {
@@ -581,7 +617,26 @@ final class SturdyChat_SitemapIndexer
         }
 
         // Replace previous rows for this URL
-        $wpdb->delete($table, ['url' => $url]);
+        if (empty($deleteUrls)) {
+            $deleteUrls = [$url];
+        }
+        $deleteMap = [];
+        foreach ($deleteUrls as $candidate) {
+            if (!is_string($candidate)) {
+                continue;
+            }
+            $candidate = trim($candidate);
+            if ($candidate === '') {
+                continue;
+            }
+            $deleteMap[$candidate] = true;
+        }
+        if (!$deleteMap) {
+            $deleteMap[$url] = true;
+        }
+        foreach (array_keys($deleteMap) as $deleteUrl) {
+            $wpdb->delete($table, ['url' => $deleteUrl]);
+        }
 
         foreach ($chunks as $i => $chunk) {
             $vec = SturdyChat_Embedder::embed($chunk, $s);
@@ -659,6 +714,6 @@ final class SturdyChat_SitemapIndexer
         // You currently don't store lastmod in the queue, so pass null here.
         // If you later switch the queue to keep ['loc' => ..., 'lastmod' => ...],
         // you can thread lastmod through.
-        self::indexUrl($url, null, $settings);
+        self::indexUrl($url, null, $settings, false, [$url]);
     }
 }
