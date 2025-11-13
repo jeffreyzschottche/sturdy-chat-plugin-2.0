@@ -43,19 +43,6 @@ class SturdyChat_REST
      */
     public static function handleAsk(WP_REST_Request $req): WP_REST_Response
     {
-        $s = get_option('sturdychat_settings', []);
-        $cacheEnabled = (bool) get_option('sturdychat_cache_enabled', 1);
-        $cacheAvailable = $cacheEnabled && class_exists('SturdyChat_Cache');
-        $configuredFallback = null;
-        if (class_exists('SturdyChat_RAG')) {
-            if (method_exists('SturdyChat_RAG', 'fallbackAnswer')) {
-                $configuredFallback = SturdyChat_RAG::fallbackAnswer($s);
-            } elseif (defined('SturdyChat_RAG::FALLBACK_ANSWER')) {
-                $configuredFallback = SturdyChat_RAG::FALLBACK_ANSWER;
-            }
-        }
-
-        // Get Query from ?q or JSON body {question:"..."}
         $q = $req->get_param('q');
         if (!$q) {
             $body = $req->get_json_params();
@@ -65,89 +52,20 @@ class SturdyChat_REST
         if ($q === '') {
             return new WP_REST_Response([
                 'error' => 'empty_question',
-                'message' => 'Vraag is leeg.'
+                'message' => __('Vraag is leeg.', 'sturdychat-chatbot')
             ], 400);
         }
 
-        if ($cacheAvailable) {
-            $cached = SturdyChat_Cache::find($q);
-            if (is_array($cached) && isset($cached['answer'])) {
-                return new WP_REST_Response($cached, 200);
-            }
-        }
-
-        // Firstly let the CPT-modules try to handle the query
-//        if (class_exists('SturdyChat_CPTs')) {
-//            $maybe = SturdyChat_CPTs::maybe_handle_query($q, $s);
-//            if (is_array($maybe) && isset($maybe['answer'])) {
-//                // Can be expanded with multiple sources, e.g. from a knowledge base
-//                return new WP_REST_Response($maybe, 200);
-//            }
-//        }
-        if (class_exists('SturdyChat_CPTs')) {
-            $maybe = SturdyChat_CPTs::maybe_handle_query($q, $s);
-            if (is_array($maybe) && isset($maybe['answer'])) {
-//                // Paste Bron/Source under the answer
-                $answer = (string) $maybe['answer'];
-                $sources = isset($maybe['sources']) && is_array($maybe['sources']) ? $maybe['sources'] : [];
-                $isFallback = ($configuredFallback !== null && $answer === $configuredFallback);
-                if ($isFallback) {
-                    $sources = [];
-                }
-                if ($cacheAvailable) {
-                    SturdyChat_Cache::store($q, $answer, $sources);
-                }
-                return new WP_REST_Response([
-                    'answer'  => $answer,
-                    'sources' => $isFallback ? [] : array_map(
-                        fn($src) => [
-                            'title' => $src['title'] ?? '',
-                            'url'   => $src['url'] ?? '',
-                            'score' => $src['score'] ?? 0,
-                        ],
-                        $sources
-                    ),
-                ], 200);
-            }
-        }
-
-
-        // Fallback the Retrieval-Augmented Generation, this will check the database for relevant content
-        try {
-            $out = SturdyChat_RAG::answer($q, $s);
-            if (empty($out['ok'])) {
-                return new WP_REST_Response([
-                    'error' => 'chat_failed',
-                    'message' => isset($out['message']) ? $out['message'] : 'Onbekende fout'
-                ], 500);
-            }
-
-            $answer  = (string) ($out['answer'] ?? '');
-            $sources = isset($out['sources']) && is_array($out['sources']) ? $out['sources'] : [];
-            $isFallback = ($configuredFallback !== null && $answer === $configuredFallback);
-            if ($isFallback) {
-                $sources = [];
-            }
-            if ($cacheAvailable) {
-                SturdyChat_Cache::store($q, $answer, $sources);
-            }
+        $result = sturdychat_answer_question($q);
+        if (is_wp_error($result)) {
+            $code = $result->get_error_code();
+            $status = ($code === 'empty_question') ? 400 : 500;
             return new WP_REST_Response([
-                'answer'  => $answer,
-                'sources' => $isFallback ? [] : array_map(
-                    fn($src) => [
-                        'title' => $src['title'] ?? '',
-                        'url'   => $src['url'] ?? '',
-                        'score' => $src['score'] ?? 0,
-                    ],
-                    $sources
-                ),
-            ], 200);
-
-        } catch (\Throwable $e) {
-            return new WP_REST_Response([
-                'error' => 'server_error',
-                'message' => $e->getMessage()
-            ], 500);
+                'error' => $code,
+                'message' => $result->get_error_message()
+            ], $status);
         }
+
+        return new WP_REST_Response($result, 200);
     }
 }

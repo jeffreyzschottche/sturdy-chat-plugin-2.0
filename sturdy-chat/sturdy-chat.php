@@ -344,6 +344,184 @@ function sturdychat_normalize_url_path(string $path): string
     return strtolower($path);
 }
 
+function sturdychat_sanitize_hex_color_default(?string $color, string $default): string
+{
+    $color = (string) $color;
+
+    if (function_exists('sanitize_hex_color')) {
+        $sanitized = sanitize_hex_color($color);
+        if ($sanitized !== null && $sanitized !== false) {
+            return $sanitized;
+        }
+    } elseif (preg_match('/^#([0-9a-f]{3}|[0-9a-f]{6})$/i', $color)) {
+        return $color;
+    }
+
+    return $default;
+}
+
+function sturdychat_get_ui_settings(?array $settings = null): array
+{
+    $settings = $settings ?? get_option('sturdychat_settings', []);
+
+    $textColor = sturdychat_sanitize_hex_color_default($settings['ui_text_color'] ?? '', '#0f172a');
+    $pillColor = sturdychat_sanitize_hex_color_default($settings['ui_pill_color'] ?? '', '#2563eb');
+
+    $limit = isset($settings['ui_sources_limit']) ? (int) $settings['ui_sources_limit'] : 3;
+    $limit = max(1, min(6, $limit));
+
+    $style = isset($settings['ui_style_variant']) ? sanitize_key((string) $settings['ui_style_variant']) : 'pill';
+    $allowedStyles = ['pill', 'outline', 'minimal'];
+    if (!in_array($style, $allowedStyles, true)) {
+        $style = 'pill';
+    }
+
+    return [
+        'text_color'     => $textColor,
+        'pill_color'     => $pillColor,
+        'sources_limit'  => $limit,
+        'style_variant'  => $style,
+    ];
+}
+
+/**
+ * Cap the number of sources shown client side.
+ *
+ * @param array<int, array{title:string,url:string,score:float}> $sources
+ * @return array<int, array{title:string,url:string,score:float}>
+ */
+function sturdychat_limit_sources(array $sources, int $limit): array
+{
+    if ($limit < 1) {
+        return $sources;
+    }
+
+    return array_slice($sources, 0, $limit);
+}
+
+/**
+ * Normalize source entries so both the REST endpoint and shortcode can reuse them.
+ *
+ * @param array<int, array{title?:string,url?:string,score?:float}> $sources
+ * @return array<int, array{title:string,url:string,score:float}>
+ */
+function sturdychat_prepare_sources(array $sources, ?string $fallbackAnswer, string $answer): array
+{
+    if ($fallbackAnswer !== null && $answer === $fallbackAnswer) {
+        return [];
+    }
+
+    $normalized = [];
+    foreach ($sources as $source) {
+        if (!is_array($source)) {
+            continue;
+        }
+
+        $title = isset($source['title']) ? trim((string) $source['title']) : '';
+        $url = isset($source['url']) ? trim((string) $source['url']) : '';
+        $score = isset($source['score']) ? (float) $source['score'] : 0.0;
+
+        if ($title === '' && $url === '') {
+            continue;
+        }
+
+        $normalized[] = [
+            'title' => $title,
+            'url' => $url,
+            'score' => $score,
+        ];
+    }
+
+    return $normalized;
+}
+
+/**
+ * Shared question handler that powers both shortcode output and the REST endpoint.
+ *
+ * @return array{answer:string,sources:array<int,array{title:string,url:string,score:float}>}|\WP_Error
+ */
+function sturdychat_answer_question(string $question)
+{
+    $question = trim((string) $question);
+    if ($question === '') {
+        return new WP_Error('empty_question', __('Vraag is leeg.', 'sturdychat-chatbot'));
+    }
+
+    $settings = get_option('sturdychat_settings', []);
+    $cacheEnabled = (bool) get_option('sturdychat_cache_enabled', 1);
+    $cacheAvailable = $cacheEnabled && class_exists('SturdyChat_Cache');
+    $ui = sturdychat_get_ui_settings($settings);
+    $maxSources = (int) $ui['sources_limit'];
+
+    $configuredFallback = null;
+    if (class_exists('SturdyChat_RAG')) {
+        if (method_exists('SturdyChat_RAG', 'fallbackAnswer')) {
+            $configuredFallback = SturdyChat_RAG::fallbackAnswer($settings);
+        } elseif (defined('SturdyChat_RAG::FALLBACK_ANSWER')) {
+            $configuredFallback = SturdyChat_RAG::FALLBACK_ANSWER;
+        }
+    }
+
+    if ($cacheAvailable) {
+        $cached = SturdyChat_Cache::find($question);
+        if (is_array($cached) && isset($cached['answer'])) {
+            $answer = (string) $cached['answer'];
+            $sources = sturdychat_prepare_sources($cached['sources'] ?? [], $configuredFallback, $answer);
+            $sources = sturdychat_limit_sources($sources, $maxSources);
+            return [
+                'answer'  => $answer,
+                'sources' => $sources,
+            ];
+        }
+    }
+
+    if (class_exists('SturdyChat_CPTs')) {
+        $maybe = SturdyChat_CPTs::maybe_handle_query($question, $settings);
+        if (is_array($maybe) && isset($maybe['answer'])) {
+            $answer = (string) $maybe['answer'];
+            $sources = sturdychat_prepare_sources($maybe['sources'] ?? [], $configuredFallback, $answer);
+            $sources = sturdychat_limit_sources($sources, $maxSources);
+
+            if ($cacheAvailable) {
+                SturdyChat_Cache::store($question, $answer, $sources);
+            }
+
+            return [
+                'answer'  => $answer,
+                'sources' => $sources,
+            ];
+        }
+    }
+
+    if (!class_exists('SturdyChat_RAG')) {
+        return new WP_Error('rag_missing', __('RAG component ontbreekt.', 'sturdychat-chatbot'));
+    }
+
+    try {
+        $out = SturdyChat_RAG::answer($question, $settings);
+    } catch (\Throwable $e) {
+        return new WP_Error('server_error', $e->getMessage());
+    }
+
+    if (empty($out['ok'])) {
+        $message = isset($out['message']) ? (string) $out['message'] : __('Onbekende fout', 'sturdychat-chatbot');
+        return new WP_Error('chat_failed', $message);
+    }
+
+    $answer = (string) ($out['answer'] ?? '');
+    $sources = sturdychat_prepare_sources($out['sources'] ?? [], $configuredFallback, $answer);
+    $sources = sturdychat_limit_sources($sources, $maxSources);
+
+    if ($cacheAvailable) {
+        SturdyChat_Cache::store($question, $answer, $sources);
+    }
+
+    return [
+        'answer'  => $answer,
+        'sources' => $sources,
+    ];
+}
+
 if (class_exists('SturdyChat_CPTs')) {
     SturdyChat_CPTs::init();
 }
@@ -367,6 +545,10 @@ register_activation_hook(__FILE__, function () {
             'batch_size' => 25,
             'chunk_chars' => 1200,
             'chat_title' => 'Stel je vraag',
+            'ui_text_color' => '#0f172a',
+            'ui_pill_color' => '#2563eb',
+            'ui_sources_limit' => 3,
+            'ui_style_variant' => 'pill',
             'fallback_answer' => class_exists('SturdyChat_RAG')
                 ? SturdyChat_RAG::FALLBACK_ANSWER
                 : 'Deze informatie bestaat niet in onze huidige kennisbank. Probeer je vraag specifieker te stellen of gebruik andere trefwoorden.',
@@ -414,31 +596,95 @@ add_action('plugins_loaded', function () {
      * Shortcode [sturdy-chat]
      */
     add_shortcode('sturdy-chat', function ($atts = []) {
-        $s = get_option('sturdychat_settings', []);
+        $settings = get_option('sturdychat_settings', []);
+        $ui = sturdychat_get_ui_settings($settings);
+
         $atts = shortcode_atts([
-            'title' => $s['chat_title'] ?? 'Stel je vraag',
-            'placeholder' => '',
-            'button' => '',
+            'question' => '',
         ], $atts, 'sturdy-chat');
 
-        $rest_url = rest_url('sturdychat/v1/ask');
-        $rest_fallback = home_url('/index.php?rest_route=/sturdychat/v1/ask');
+        $question = trim((string) $atts['question']);
+        if ($question === '' && function_exists('is_search') && is_search()) {
+            $question = (string) get_search_query();
+        }
 
-        wp_enqueue_style('sturdychat-chatbot', STURDYCHAT_URL . 'assets/css/chatbot.css', [], STURDYCHAT_VERSION);
-        wp_enqueue_script('sturdychat-chatbot', STURDYCHAT_URL . 'assets/js/chatbot.js', [], STURDYCHAT_VERSION, true);
+        if ($question === '') {
+            return '';
+        }
 
-        wp_localize_script('sturdychat-chatbot', 'STURDYCHAT', [
-            'restUrl' => esc_url_raw($rest_url),
-            'restUrlFallback' => esc_url_raw($rest_fallback),
-            'title' => $atts['title'],
-            'placeholder' => $atts['placeholder'],
-            'button' => $atts['button'],
-        ]);
+        wp_enqueue_style('sturdychat-result', STURDYCHAT_URL . 'assets/css/sturdychat-result.css', [], STURDYCHAT_VERSION);
+        wp_enqueue_script('sturdychat-result', STURDYCHAT_URL . 'assets/js/sturdychat-result.js', [], STURDYCHAT_VERSION, true);
 
-        ob_start(); ?>
-        <div class="sturdychat-chatbot" data-rest-url="<?php echo esc_attr($rest_url); ?>"
-            data-rest-fallback="<?php echo esc_attr($rest_fallback); ?>"></div>
-        <?php return ob_get_clean();
+        $result = sturdychat_answer_question($question);
+        if (is_wp_error($result)) {
+            return sprintf(
+                '<div class="sturdychat-result sturdychat-result--error">%s</div>',
+                esc_html($result->get_error_message())
+            );
+        }
+
+        $answerText = isset($result['answer']) ? (string) $result['answer'] : '';
+        $sources = isset($result['sources']) && is_array($result['sources']) ? $result['sources'] : [];
+        $answerHtml = wpautop(wp_kses_post($answerText));
+
+        $styleAttr = sprintf(
+            'style="--sturdychat-text-color:%1$s;--sturdychat-pill-color:%2$s;"',
+            esc_attr($ui['text_color']),
+            esc_attr($ui['pill_color'])
+        );
+
+        $styleClass = sanitize_html_class('sturdychat-style-' . $ui['style_variant']);
+        $html = sprintf(
+            '<div class="sturdychat-result %s" %s data-style="%s">',
+            $styleClass,
+            $styleAttr,
+            esc_attr($ui['style_variant'])
+        );
+
+        if ($answerText !== '') {
+            $html .= '<div class="sturdychat-result__answer">';
+            $html .= '<div class="sturdychat-result__answer-text" aria-live="polite"></div>';
+            $html .= '<template class="sturdychat-answer-template">' . $answerHtml . '</template>';
+            $html .= '<noscript><div class="sturdychat-result__answer-noscript">' . $answerHtml . '</div></noscript>';
+            $html .= '</div>';
+        }
+
+        $items = [];
+        foreach ($sources as $source) {
+            if (!is_array($source)) {
+                continue;
+            }
+            $title = isset($source['title']) ? trim((string) $source['title']) : '';
+            $url = isset($source['url']) ? trim((string) $source['url']) : '';
+            if ($title === '' && $url === '') {
+                continue;
+            }
+            if ($title === '') {
+                $title = $url;
+            }
+
+            if ($url !== '') {
+                $items[] = sprintf(
+                    '<li><a href="%s" target="_blank" rel="noopener">%s</a></li>',
+                    esc_url($url),
+                    esc_html($title)
+                );
+            } else {
+                $items[] = sprintf('<li>%s</li>', esc_html($title));
+            }
+        }
+
+        if (!empty($items)) {
+            $html .= sprintf(
+                '<div class="sturdychat-result__sources"><strong>%s</strong><ol>%s</ol></div>',
+                esc_html__('Bronnen', 'sturdychat-chatbot'),
+                implode('', $items)
+            );
+        }
+
+        $html .= '</div>';
+
+        return $html;
     });
 
     // WP index is deprecated; sitemap worker handles crawling.

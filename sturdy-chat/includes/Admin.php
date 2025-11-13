@@ -80,6 +80,10 @@ class SturdyChat_Admin
         add_settings_field('chunk_chars', __('Chunk size (characters)', 'sturdychat-chatbot'), [__CLASS__, 'fieldChunkChars'], 'sturdychat', 'sturdychat_main');
         add_settings_field('chat_title', __('Chat title', 'sturdychat-chatbot'), [__CLASS__, 'fieldChatTitle'], 'sturdychat', 'sturdychat_main');
         add_settings_field('fallback_answer', __('Fallback answer', 'sturdychat-chatbot'), [__CLASS__, 'fieldFallbackAnswer'], 'sturdychat', 'sturdychat_main');
+        add_settings_field('ui_text_color', __('Answer text color', 'sturdychat-chatbot'), [__CLASS__, 'fieldUiTextColor'], 'sturdychat', 'sturdychat_main');
+        add_settings_field('ui_pill_color', __('Source pill color', 'sturdychat-chatbot'), [__CLASS__, 'fieldUiPillColor'], 'sturdychat', 'sturdychat_main');
+        add_settings_field('ui_sources_limit', __('Maximum sources to show', 'sturdychat-chatbot'), [__CLASS__, 'fieldUiSourcesLimit'], 'sturdychat', 'sturdychat_main');
+        add_settings_field('ui_style_variant', __('Source style', 'sturdychat-chatbot'), [__CLASS__, 'fieldUiStyleVariant'], 'sturdychat', 'sturdychat_main');
 
         // New: Sitemap URL
         add_settings_field(
@@ -171,6 +175,16 @@ class SturdyChat_Admin
             : 'Deze informatie bestaat niet in onze huidige kennisbank. Probeer je vraag specifieker te stellen of gebruik andere trefwoorden.';
         $fallbackInput = isset($in['fallback_answer']) ? sanitize_textarea_field((string) $in['fallback_answer']) : '';
         $out['fallback_answer'] = $fallbackInput !== '' ? $fallbackInput : $fallbackDefault;
+        $out['ui_text_color']    = sturdychat_sanitize_hex_color_default($in['ui_text_color'] ?? '', '#0f172a');
+        $out['ui_pill_color']    = sturdychat_sanitize_hex_color_default($in['ui_pill_color'] ?? '', '#2563eb');
+        $limit                   = isset($in['ui_sources_limit']) ? (int) $in['ui_sources_limit'] : 3;
+        $out['ui_sources_limit'] = max(1, min(6, $limit));
+        $variant                 = isset($in['ui_style_variant']) ? sanitize_key((string) $in['ui_style_variant']) : 'pill';
+        $allowedVariants         = ['pill', 'outline', 'minimal'];
+        if (!in_array($variant, $allowedVariants, true)) {
+            $variant = 'pill';
+        }
+        $out['ui_style_variant'] = $variant;
 
         // New
         $out['sitemap_url'] = isset($in['sitemap_url']) ? esc_url_raw($in['sitemap_url']) : home_url('/sitemap_index.xml');
@@ -482,6 +496,53 @@ class SturdyChat_Admin
         $value = isset($s['fallback_answer']) && $s['fallback_answer'] !== '' ? (string) $s['fallback_answer'] : $default;
         echo '<textarea name="sturdychat_settings[fallback_answer]" rows="3" class="large-text code">' . esc_textarea($value) . '</textarea>';
         echo '<p class="description">' . esc_html__('Dit antwoord tonen we wanneer er geen context gevonden wordt.', 'sturdychat-chatbot') . '</p>';
+    }
+
+    public static function fieldUiTextColor(): void
+    {
+        $s = get_option('sturdychat_settings', []);
+        $val = $s['ui_text_color'] ?? '#0f172a';
+        printf('<input type="color" name="sturdychat_settings[ui_text_color]" value="%s" />', esc_attr($val));
+        echo '<p class="description">' . esc_html__('Pas hiermee de kleur van het antwoord aan.', 'sturdychat-chatbot') . '</p>';
+    }
+
+    public static function fieldUiPillColor(): void
+    {
+        $s = get_option('sturdychat_settings', []);
+        $val = $s['ui_pill_color'] ?? '#2563eb';
+        printf('<input type="color" name="sturdychat_settings[ui_pill_color]" value="%s" />', esc_attr($val));
+        echo '<p class="description">' . esc_html__('Bepaalt de achtergrondkleur van de bron-pills/tabs.', 'sturdychat-chatbot') . '</p>';
+    }
+
+    public static function fieldUiSourcesLimit(): void
+    {
+        $s = get_option('sturdychat_settings', []);
+        $val = (int) ($s['ui_sources_limit'] ?? 3);
+        printf('<input type="number" min="1" max="6" name="sturdychat_settings[ui_sources_limit]" value="%d" />', $val);
+        echo '<p class="description">' . esc_html__('Kies hoeveel bronnen maximaal worden getoond (max 6).', 'sturdychat-chatbot') . '</p>';
+    }
+
+    public static function fieldUiStyleVariant(): void
+    {
+        $s = get_option('sturdychat_settings', []);
+        $val = $s['ui_style_variant'] ?? 'pill';
+        $options = [
+            'pill'    => __('Gevulde pills', 'sturdychat-chatbot'),
+            'outline' => __('Outline tabs', 'sturdychat-chatbot'),
+            'minimal' => __('Minimal underline', 'sturdychat-chatbot'),
+        ];
+
+        echo '<select name="sturdychat_settings[ui_style_variant]">';
+        foreach ($options as $key => $label) {
+            printf(
+                '<option value="%s" %s>%s</option>',
+                esc_attr($key),
+                selected($val, $key, false),
+                esc_html($label)
+            );
+        }
+        echo '</select>';
+        echo '<p class="description">' . esc_html__('Bepaal de stijl van de bronnenlijst.', 'sturdychat-chatbot') . '</p>';
     }
 
     /**
