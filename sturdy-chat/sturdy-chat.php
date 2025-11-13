@@ -161,6 +161,177 @@ function sturdychat_trigger_sitemap_index_on_save(int $post_id, $post, bool $upd
 }
 add_action('save_post', 'sturdychat_trigger_sitemap_index_on_save', 20, 3);
 
+/**
+ * Cleanup helper: remove indexed chunks and cached answers when a post is deleted.
+ *
+ * @param int $post_id
+ * @return void
+ */
+function sturdychat_handle_post_delete(int $post_id): void
+{
+    if (wp_is_post_revision($post_id) || wp_is_post_autosave($post_id)) {
+        return;
+    }
+
+    $post = get_post($post_id);
+    if (!$post instanceof WP_Post) {
+        return;
+    }
+
+    $targets = sturdychat_collect_post_url_targets($post);
+    $urls    = $targets['urls'];
+    $paths   = $targets['paths'];
+
+    global $wpdb;
+
+    if (defined('STURDYCHAT_TABLE')) {
+        $wpdb->delete(STURDYCHAT_TABLE, ['post_id' => $post_id], ['%d']);
+    }
+
+    if (defined('STURDYCHAT_TABLE_SITEMAP')) {
+        if ($urls) {
+            $placeholders = implode(', ', array_fill(0, count($urls), '%s'));
+            $sql = "DELETE FROM " . STURDYCHAT_TABLE_SITEMAP . " WHERE url IN ($placeholders)";
+            $wpdb->query($wpdb->prepare($sql, $urls));
+        }
+
+        if ($paths) {
+            $conditions = [];
+            $args       = [];
+            foreach ($paths as $path) {
+                if ($path === '' || $path === '/') {
+                    continue;
+                }
+                $conditions[] = 'url LIKE %s';
+                $args[]       = '%' . $path . '%';
+            }
+            if ($conditions) {
+                $sql = "DELETE FROM " . STURDYCHAT_TABLE_SITEMAP . " WHERE " . implode(' OR ', $conditions);
+                $wpdb->query($wpdb->prepare($sql, $args));
+            }
+        }
+    }
+
+    if (class_exists('SturdyChat_Cache') && method_exists('SturdyChat_Cache', 'purgeBySourceUrls')) {
+        SturdyChat_Cache::purgeBySourceUrls($urls, $paths);
+    }
+}
+add_action('before_delete_post', 'sturdychat_handle_post_delete', 10, 1);
+add_action('wp_trash_post', 'sturdychat_handle_post_delete', 10, 1);
+
+/**
+ * Collect URL and path variants for a post so we can purge chunks/caches reliably.
+ *
+ * @param WP_Post $post
+ * @return array{urls:array<int,string>,paths:array<int,string>}
+ */
+function sturdychat_collect_post_url_targets(WP_Post $post): array
+{
+    $candidates = [];
+    $permalink  = get_permalink($post);
+    if ($permalink && !is_wp_error($permalink)) {
+        $candidates[] = $permalink;
+    }
+
+    if (function_exists('get_post_permalink')) {
+        $sample = get_post_permalink($post, false, true);
+        if ($sample && !is_wp_error($sample)) {
+            $candidates[] = $sample;
+        }
+    }
+
+    $uri = function_exists('get_page_uri') ? get_page_uri($post) : '';
+    if (is_string($uri) && $uri !== '') {
+        $uri = '/' . ltrim($uri, '/');
+        if (function_exists('user_trailingslashit')) {
+            $candidates[] = home_url(user_trailingslashit($uri));
+            $candidates[] = home_url(untrailingslashit($uri));
+        } else {
+            $candidates[] = home_url(rtrim($uri, '/') . '/');
+            $candidates[] = home_url(rtrim($uri, '/'));
+        }
+    }
+
+    $candidates[] = home_url('?p=' . $post->ID);
+
+    $urls = [];
+    foreach ($candidates as $candidate) {
+        if (!is_string($candidate)) {
+            continue;
+        }
+        $candidate = trim($candidate);
+        if ($candidate === '') {
+            continue;
+        }
+        $urls[] = $candidate;
+        if (function_exists('set_url_scheme')) {
+            $urls[] = set_url_scheme($candidate, 'https');
+            $urls[] = set_url_scheme($candidate, 'http');
+        }
+    }
+
+    $expanded = [];
+    foreach ($urls as $url) {
+        if ($url === '') {
+            continue;
+        }
+        $expanded[] = $url;
+        if (function_exists('untrailingslashit')) {
+            $trimmed = untrailingslashit($url);
+            $expanded[] = $trimmed;
+            $expanded[] = trailingslashit($trimmed);
+        } else {
+            $trimmed = rtrim($url, '/');
+            $expanded[] = $trimmed;
+            $expanded[] = $trimmed . '/';
+        }
+    }
+    $urls = array_values(array_unique(array_filter($expanded, static fn($url): bool => is_string($url) && $url !== '')));
+
+    $paths = [];
+    foreach ($urls as $url) {
+        $parts = wp_parse_url($url);
+        if (is_array($parts) && isset($parts['path'])) {
+            $paths[] = sturdychat_normalize_url_path($parts['path']);
+        }
+    }
+
+    if (!empty($post->post_name)) {
+        $paths[] = sturdychat_normalize_url_path('/' . ltrim((string) $post->post_name, '/'));
+    }
+
+    if ($uri) {
+        $paths[] = sturdychat_normalize_url_path($uri);
+    }
+
+    $paths = array_values(array_unique(array_filter($paths, static fn($path): bool => is_string($path) && $path !== '')));
+
+    return [
+        'urls'  => $urls,
+        'paths' => $paths,
+    ];
+}
+
+/**
+ * Normalize a URL path to a consistent form (leading slash, no trailing slash, lower-case).
+ */
+function sturdychat_normalize_url_path(string $path): string
+{
+    $path = trim($path);
+    if ($path === '') {
+        return '';
+    }
+    if ($path[0] !== '/') {
+        $path = '/' . $path;
+    }
+    if (function_exists('untrailingslashit')) {
+        $path = untrailingslashit($path);
+    } else {
+        $path = rtrim($path, '/');
+    }
+    return strtolower($path);
+}
+
 if (class_exists('SturdyChat_CPTs')) {
     SturdyChat_CPTs::init();
 }
@@ -177,6 +348,7 @@ register_activation_hook(__FILE__, function () {
             'top_k' => 6,
             'temperature' => 0.2,
             'index_post_types' => sturdychat_all_public_types(),
+            'index_post_types_order' => sturdychat_all_public_types(),
             'include_taxonomies' => 1,
             'include_meta' => 0,
             'meta_keys' => '',

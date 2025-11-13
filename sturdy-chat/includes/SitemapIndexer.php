@@ -542,8 +542,18 @@ final class SturdyChat_SitemapIndexer
             $publishedAt = $lastmod;
         }
 
-        // CPT guess (first path segment)
+        // Determine CPT/type (prefer actual WP post type, fallback to guessed path segment)
         $cpt = self::guessCpt($url);
+        if (function_exists('url_to_postid')) {
+            $postId = url_to_postid($url);
+            if ($postId) {
+                $post = get_post($postId);
+                if ($post instanceof \WP_Post) {
+                    $cpt = sanitize_key($post->post_type);
+                }
+            }
+        }
+        $cpt = sanitize_key($cpt);
 
         $plain = wp_strip_all_tags($content);
         if ($plain === '') {
@@ -557,14 +567,17 @@ final class SturdyChat_SitemapIndexer
         $hash       = hash('sha256', $plain);
         $now        = current_time('mysql');
 
-        // Unchanged? (by URL + hash)
-        $exists = (int) $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$table} WHERE url=%s AND content_hash=%s",
-            $url,
-            $hash
-        ));
-        if ($exists > 0) {
-            return null;
+        // Unchanged? (by URL + hash) — but allow reinsert if CPT changed.
+        $existingRow = $wpdb->get_row($wpdb->prepare(
+            "SELECT cpt, content_hash FROM {$table} WHERE url = %s LIMIT 1",
+            $url
+        ), ARRAY_A);
+        if ($existingRow) {
+            $existingHash = (string) ($existingRow['content_hash'] ?? '');
+            $existingCpt  = sanitize_key((string) ($existingRow['cpt'] ?? ''));
+            if ($existingHash === $hash && $existingCpt === $cpt) {
+                return null;
+            }
         }
 
         // Replace previous rows for this URL
@@ -611,7 +624,7 @@ final class SturdyChat_SitemapIndexer
             return 'page';
         }
         $parts = explode('/', $p);
-        return sanitize_title($parts[0] ?? 'page');
+        return sanitize_key($parts[0] ?? 'page');
     }
 
     private static function chunkText(string $text, int $maxChars): array

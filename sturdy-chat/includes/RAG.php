@@ -122,6 +122,7 @@ class SturdyChat_RAG
         $cptHint  = self::inferCptHint($query);
         $queryLower = mb_strtolower($query);
         $dateHint = self::parseDutchDate($query);
+        $cptPriorityBoosts = self::buildCptPriorityBoosts($s);
 
         // (2) Indexkeuze + CPT-routing (enkel sitemap)
         $primaryTable = STURDYCHAT_TABLE_SITEMAP;
@@ -209,6 +210,11 @@ class SturdyChat_RAG
             $boost = 0.0;
             if (!empty($hints['postId'])) $boost += 0.05;
             if (!empty($hints['url']))    $boost += 0.05;
+
+            $rowCpt = sanitize_key((string)($row['cpt'] ?? ''));
+            if ($rowCpt !== '' && isset($cptPriorityBoosts[$rowCpt])) {
+                $boost += $cptPriorityBoosts[$rowCpt];
+            }
 
             // CPT-voorrang + hub super-boost
             if (!empty($row['_cpt_match'])) $boost += 0.50;
@@ -797,6 +803,61 @@ class SturdyChat_RAG
             return ['iso'=>$iso,'text'=>mb_strtolower($text)];
         }
         return ['iso'=>'','text'=>''];
+    }
+
+    /**
+     * Bouw een map met mini-boosts per CPT op basis van de ingestelde volgorde.
+     *
+     * @param array $settings Plugin-instellingen.
+     * @return array<string,float> Sleutel = cpt (lowercase), waarde = boost.
+     */
+    private static function buildCptPriorityBoosts(array $settings): array
+    {
+        $orderList = [];
+
+        if (isset($settings['index_post_types_order']) && is_array($settings['index_post_types_order'])) {
+            foreach ($settings['index_post_types_order'] as $slug) {
+                $slug = sanitize_key((string) $slug);
+                if ($slug === '') {
+                    continue;
+                }
+                if (!in_array($slug, $orderList, true)) {
+                    $orderList[] = $slug;
+                }
+            }
+        }
+
+        if (!$orderList && function_exists('sturdychat_all_public_types')) {
+            foreach (sturdychat_all_public_types() as $slug) {
+                $slug = sanitize_key((string) $slug);
+                if ($slug === '') {
+                    continue;
+                }
+                if (!in_array($slug, $orderList, true)) {
+                    $orderList[] = $slug;
+                }
+            }
+        }
+
+        $total = count($orderList);
+        if ($total === 0) {
+            return [];
+        }
+
+        $maxBoost = 0.12;
+        $minBoost = -0.02;
+        $step = $total > 1 ? ($maxBoost - $minBoost) / ($total - 1) : 0.0;
+
+        $map = [];
+        foreach ($orderList as $idx => $slug) {
+            $boost = $maxBoost - ($idx * $step);
+            if ($boost < $minBoost) {
+                $boost = $minBoost;
+            }
+            $map[$slug] = round($boost, 6);
+        }
+
+        return $map;
     }
 
     /**

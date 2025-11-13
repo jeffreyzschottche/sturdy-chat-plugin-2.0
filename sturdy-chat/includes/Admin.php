@@ -116,14 +116,48 @@ class SturdyChat_Admin
         $out['top_k']           = max(1, min(12, (int) ($in['top_k'] ?? 6)));
         $out['temperature']     = max(0, min(1, (float) ($in['temperature'] ?? 0.2)));
 
-        // Post types: default to all public CPTs (excluding attachment).
+        // Post types: selection + ordering (drag & drop)
         $allPublic = sturdychat_all_public_types();
-        if (isset($in['index_post_types']) && is_array($in['index_post_types']) && count($in['index_post_types']) > 0) {
-            $chosen = array_map('sanitize_text_field', $in['index_post_types']);
-            $out['index_post_types'] = array_values(array_unique(array_merge($chosen, $allPublic)));
-        } else {
-            $out['index_post_types'] = $allPublic;
+
+        $orderInput = isset($in['index_post_types_order']) && is_array($in['index_post_types_order'])
+            ? array_map(static fn($slug): string => sanitize_key((string) $slug), $in['index_post_types_order'])
+            : [];
+
+        $order = [];
+        foreach ($orderInput as $slug) {
+            if ($slug === '') {
+                continue;
+            }
+            if (!in_array($slug, $order, true) && in_array($slug, $allPublic, true)) {
+                $order[] = $slug;
+            }
         }
+
+        foreach ($allPublic as $slug) {
+            if (!in_array($slug, $order, true)) {
+                $order[] = $slug;
+            }
+        }
+
+        $selectedInput = isset($in['index_post_types']) && is_array($in['index_post_types'])
+            ? array_map(static fn($slug): string => sanitize_key((string) $slug), $in['index_post_types'])
+            : [];
+
+        $selectedInput = array_values(array_intersect($selectedInput, $allPublic));
+
+        $selected = [];
+        foreach ($order as $slug) {
+            if (in_array($slug, $selectedInput, true)) {
+                $selected[] = $slug;
+            }
+        }
+
+        if (!$selected) {
+            $selected = $allPublic;
+        }
+
+        $out['index_post_types']       = $selected;
+        $out['index_post_types_order'] = $order;
 
         $out['include_taxonomies'] = !empty($in['include_taxonomies']) ? 1 : 0;
         $out['include_meta']       = !empty($in['include_meta']) ? 1 : 0;
@@ -233,24 +267,126 @@ class SturdyChat_Admin
      */
     public static function fieldPostTypes(): void
     {
-        $s        = get_option('sturdychat_settings', []);
-        $all      = sturdychat_all_public_types();
-        $selected = isset($s['index_post_types']) && is_array($s['index_post_types']) ? $s['index_post_types'] : $all;
-
+        $s    = get_option('sturdychat_settings', []);
         $objs = get_post_types(['public' => true], 'objects');
         unset($objs['attachment']);
 
-        echo '<div style="display:flex;gap:1rem;flex-wrap:wrap">';
-        foreach ($objs as $k => $obj) {
-            printf(
-                '<label><input type="checkbox" name="sturdychat_settings[index_post_types][]" value="%s" %s> %s</label>',
-                esc_attr($k),
-                checked(in_array($k, $selected, true), true, false),
-                esc_html($obj->labels->name)
-            );
+        $available = array_keys($objs);
+
+        $orderStored = isset($s['index_post_types_order']) && is_array($s['index_post_types_order'])
+            ? array_values(array_intersect($s['index_post_types_order'], $available))
+            : [];
+
+        $order = array_merge($orderStored, array_diff($available, $orderStored));
+
+        $selected = isset($s['index_post_types']) && is_array($s['index_post_types']) && $s['index_post_types']
+            ? array_values(array_intersect($s['index_post_types'], $order))
+            : $order;
+
+        static $assetsInjected = false;
+        if (!$assetsInjected) {
+            $assetsInjected = true;
+            ?>
+            <style>
+                .sturdychat-cpt-sortable{margin:0;padding:0;list-style:none;max-width:520px;}
+                .sturdychat-cpt-row{display:flex;align-items:center;gap:0.6rem;padding:0.45rem 0.6rem;border:1px solid #ccd0d4;border-radius:4px;background:#fff;margin-bottom:0.5rem;cursor:move;transition:background 0.2s ease;}
+                .sturdychat-cpt-row.is-unchecked{opacity:0.55;}
+                .sturdychat-cpt-row.is-dragging{opacity:0.4;background:#f6f7f7;}
+                .sturdychat-drag-handle{cursor:grab;font-size:16px;color:#646970;display:inline-flex;align-items:center;}
+                .sturdychat-cpt-row input[type="checkbox"]{margin-right:0.35rem;}
+                .sturdychat-cpt-row:focus-within{border-color:#2271b1;box-shadow:0 0 0 1px #2271b1;}
+            </style>
+            <script>
+                document.addEventListener('DOMContentLoaded', function () {
+                    document.querySelectorAll('.sturdychat-cpt-sortable').forEach(function (list) {
+                        var dragged = null;
+
+                        var updateState = function () {
+                            list.querySelectorAll('.sturdychat-cpt-row').forEach(function (row) {
+                                var checkbox = row.querySelector('input[type="checkbox"]');
+                                if (!checkbox) {
+                                    return;
+                                }
+                                row.classList.toggle('is-unchecked', !checkbox.checked);
+                            });
+                        };
+
+                        list.querySelectorAll('.sturdychat-cpt-row').forEach(function (row) {
+                            row.addEventListener('dragstart', function (e) {
+                                dragged = row;
+                                row.classList.add('is-dragging');
+                                if (e.dataTransfer) {
+                                    e.dataTransfer.effectAllowed = 'move';
+                                    try {
+                                        e.dataTransfer.setData('text/plain', '');
+                                    } catch (err) {
+                                        // ignore
+                                    }
+                                }
+                            });
+                            row.addEventListener('dragend', function () {
+                                if (dragged) {
+                                    dragged.classList.remove('is-dragging');
+                                }
+                                dragged = null;
+                            });
+                        });
+
+                        list.addEventListener('dragover', function (e) {
+                            if (!dragged) {
+                                return;
+                            }
+                            e.preventDefault();
+                            var target = e.target.closest('.sturdychat-cpt-row');
+                            if (!target || target === dragged) {
+                                return;
+                            }
+                            var rect = target.getBoundingClientRect();
+                            var after = e.clientY > rect.top + rect.height / 2;
+                            if (after) {
+                                target.after(dragged);
+                            } else {
+                                target.before(dragged);
+                            }
+                        });
+
+                        list.addEventListener('drop', function (e) {
+                            if (dragged) {
+                                e.preventDefault();
+                                dragged.classList.remove('is-dragging');
+                                dragged = null;
+                            }
+                        });
+
+                        list.addEventListener('change', function (e) {
+                            if (e.target.matches('input[type="checkbox"]')) {
+                                updateState();
+                            }
+                        });
+
+                        updateState();
+                    });
+                });
+            </script>
+            <?php
         }
-        echo '</div>';
-        echo '<p class="description">By default, all public post types are selected.</p>';
+
+        echo '<ul class="sturdychat-cpt-sortable" data-sturdychat-sortable>';
+        foreach ($order as $slug) {
+            if (!isset($objs[$slug])) {
+                continue;
+            }
+            $label     = $objs[$slug]->labels->name ?? $slug;
+            $isChecked = in_array($slug, $selected, true);
+
+            echo '<li class="sturdychat-cpt-row' . ($isChecked ? '' : ' is-unchecked') . '" draggable="true" data-cpt="' . esc_attr($slug) . '">';
+            echo '<span class="sturdychat-drag-handle" aria-hidden="true">&#9776;</span>';
+            echo '<label><input type="checkbox" name="sturdychat_settings[index_post_types][]" value="' . esc_attr($slug) . '" ' . checked($isChecked, true, false) . '> ' . esc_html($label) . '</label>';
+            echo '<input type="hidden" name="sturdychat_settings[index_post_types_order][]" value="' . esc_attr($slug) . '">';
+            echo '</li>';
+        }
+        echo '</ul>';
+        echo '<p class="description">Sleep om de prioriteit van CPT&#39;s te bepalen. Hogere items krijgen een kleine boost bij relevante resultaten.</p>';
     }
 
     /**
