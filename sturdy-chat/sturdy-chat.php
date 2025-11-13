@@ -35,13 +35,13 @@ add_filter('sturdychat_sitemap_sslverify', function($verify) {
 /** Includes */
 $need = [
     'includes/Install.php',
-    'includes/Admin.php',
+    'includes/Admin/Admin.php',
     'includes/Embedder.php',
     'includes/Indexer.php',
-    'includes/SitemapIndexer.php',
-    'includes/RAG.php',
+    'includes/SitemapIndexer/SitemapIndexer.php',
+    'includes/RAG/RAG.php',
     'includes/REST.php',
-    'includes/Cache.php',
+    'includes/Cache/Cache.php',
     'CustomLogic/CustomLogic.php',
     'CustomLogic/Jobs.php',
     'CustomLogic/Posts.php',
