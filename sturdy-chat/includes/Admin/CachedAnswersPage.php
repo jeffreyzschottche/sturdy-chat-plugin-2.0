@@ -7,6 +7,11 @@ if (!defined('ABSPATH')) {
 
 class SturdyChat_Admin_CachedAnswersPage
 {
+    /**
+     * Render the cached answers management UI and handle POST actions.
+     *
+     * @return void
+     */
     public static function render(): void
     {
         if (!current_user_can('manage_options')) {

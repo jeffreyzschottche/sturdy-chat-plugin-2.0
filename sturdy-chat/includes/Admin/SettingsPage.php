@@ -7,6 +7,11 @@ if (!defined('ABSPATH')) {
 
 class SturdyChat_Admin_SettingsPage
 {
+    /**
+     * Render the main settings page UI.
+     *
+     * @return void
+     */
     public static function render(): void
     {
         if (!current_user_can('manage_options')) {

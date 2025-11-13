@@ -8,7 +8,10 @@ if (!defined('ABSPATH')) {
 class SturdyChat_Cache_Sources
 {
     /**
-     * @param array<int, array{title?:string,url?:string,score?:float}> $sources
+     * Encode a list of sources into JSON for storage.
+     *
+     * @param array<int,array{title?:string,url?:string,score?:float}> $sources Raw sources.
+     * @return string JSON string persisted in the cache row.
      */
     public static function encode(array $sources): string
     {
@@ -40,7 +43,10 @@ class SturdyChat_Cache_Sources
     }
 
     /**
-     * @return array<int, array{title:string,url:string,score:float}>
+     * Decode a JSON sources field into normalized arrays.
+     *
+     * @param string $sources JSON string stored in the cache.
+     * @return array<int,array{title:string,url:string,score:float}>
      */
     public static function decode(string $sources): array
     {
@@ -69,8 +75,9 @@ class SturdyChat_Cache_Sources
     }
 
     /**
-     * Sanitize raw JSON input from the editor.
+     * Sanitize raw JSON input from the editor for safe storage.
      *
+     * @param string $raw Raw JSON string pasted by the editor.
      * @return array{ok:bool,value:string,message?:string}
      */
     public static function normalizeInput(string $raw): array
@@ -143,6 +150,12 @@ class SturdyChat_Cache_Sources
         return ['ok' => true, 'value' => $json];
     }
 
+    /**
+     * Return a pretty-printed JSON string for the editor interface.
+     *
+     * @param string $sources Raw sources JSON stored in the cache.
+     * @return string Normalised JSON string or original when validation fails.
+     */
     public static function formatForEditor(string $sources): string
     {
         $sources = trim($sources);

@@ -7,6 +7,12 @@ if (!defined('ABSPATH')) {
 
 class SturdyChat_Cache_Repository
 {
+    /**
+     * Retrieve a cache row matching the provided hash.
+     *
+     * @param string $hash Normalised hash of the question.
+     * @return array{id:int,answer:string,sources:?string,normalized_question:string}|null
+     */
     public static function findRowByHash(string $hash): ?array
     {
         global $wpdb;
@@ -23,7 +29,11 @@ class SturdyChat_Cache_Repository
     }
 
     /**
-     * @return array<int, array{id:int,answer:string,sources:?string,normalized_question:string}>
+     * Fetch candidate cache rows where the normalized question length is similar.
+     *
+     * @param int $minLen Minimum length to match.
+     * @param int $maxLen Maximum length to match.
+     * @return array<int,array{id:int,answer:string,sources:?string,normalized_question:string}>
      */
     public static function getCandidatesByLength(int $minLen, int $maxLen): array
     {
@@ -41,6 +51,12 @@ class SturdyChat_Cache_Repository
         return is_array($rows) ? $rows : [];
     }
 
+    /**
+     * Return the existing cache row ID for a given hash.
+     *
+     * @param string $hash Normalised hash string.
+     * @return int Cache row ID or 0 when not found.
+     */
     public static function findExistingIdByHash(string $hash): int
     {
         global $wpdb;
@@ -54,8 +70,12 @@ class SturdyChat_Cache_Repository
     }
 
     /**
-     * @param array<string,mixed> $data
-     * @param array<int,string> $format
+     * Insert or update a cache row depending on whether the hash already exists.
+     *
+     * @param array<string,mixed> $data   Column => value map for insert/update.
+     * @param array<int,string>   $format Format specifiers for $wpdb.
+     * @param int                 $existingId Existing row ID (>0) or 0 to insert.
+     * @return void
      */
     public static function upsert(array $data, array $format, int $existingId): void
     {
@@ -79,6 +99,8 @@ class SturdyChat_Cache_Repository
     }
 
     /**
+     * Fetch all rows that contain stored sources JSON.
+     *
      * @return array<int,array{id:int,sources:?string}>
      */
     public static function rowsWithSources(): array
@@ -94,7 +116,10 @@ class SturdyChat_Cache_Repository
     }
 
     /**
-     * @param array<int,int> $ids
+     * Delete cache rows by their IDs.
+     *
+     * @param array<int,int> $ids Row IDs to delete.
+     * @return void
      */
     public static function deleteIds(array $ids): void
     {

@@ -31,12 +31,26 @@ final class SturdyChat_Debugger
         'show_prompt_context'   => 'showPrompt',
     ];
 
+    /**
+     * Determine if a particular debug feature is currently enabled.
+     *
+     * @param string $key Feature key (e.g. show_query_embedding).
+     * @return bool True if logging for the feature should run.
+     */
     public static function isEnabled(string $key): bool
     {
         $value = self::$config[$key] ?? false;
         return (bool) apply_filters('sturdychat_debugger_enabled_' . $key, $value);
     }
 
+    /**
+     * Write a JSON payload to the appropriate debug results folder.
+     *
+     * @param string $key        Feature key controlling the target directory.
+     * @param string $filePrefix Prefix used to name the log file.
+     * @param array  $payload    Arbitrary data to persist as JSON.
+     * @return void
+     */
     public static function log(string $key, string $filePrefix, array $payload): void
     {
         if (!self::isEnabled($key)) {

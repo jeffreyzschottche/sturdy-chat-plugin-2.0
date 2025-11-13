@@ -6,6 +6,11 @@ if (!defined('ABSPATH')) {
 
 class SturdyChat_Admin_CacheActions
 {
+    /**
+     * Handle the admin action that triggers a full sitemap re-index.
+     *
+     * @return void
+     */
     public static function handleIndexSitemap(): void
     {
         if (!current_user_can('manage_options')) {
@@ -21,6 +26,11 @@ class SturdyChat_Admin_CacheActions
         self::redirectSettingsWithMessage($msg);
     }
 
+    /**
+     * Enable cached answers via the admin interface.
+     *
+     * @return void
+     */
     public static function handleEnableCache(): void
     {
         self::guardCacheAction('sturdychat_cache_enable');
@@ -28,6 +38,11 @@ class SturdyChat_Admin_CacheActions
         self::redirectSettingsWithMessage(__('Cache is ingeschakeld. Antwoorden worden opnieuw gebruikt.', 'sturdychat-chatbot'));
     }
 
+    /**
+     * Disable cached answers via the admin interface.
+     *
+     * @return void
+     */
     public static function handleDisableCache(): void
     {
         self::guardCacheAction('sturdychat_cache_disable');
@@ -35,6 +50,11 @@ class SturdyChat_Admin_CacheActions
         self::redirectSettingsWithMessage(__('Cache is uitgeschakeld. Antwoorden worden niet langer opgeslagen.', 'sturdychat-chatbot'));
     }
 
+    /**
+     * Reset the cached answers table to an empty state.
+     *
+     * @return void
+     */
     public static function handleResetCache(): void
     {
         self::guardCacheAction('sturdychat_cache_reset');
@@ -63,6 +83,12 @@ class SturdyChat_Admin_CacheActions
         self::redirectSettingsWithMessage($msg);
     }
 
+    /**
+     * Ensure the current user can perform cache actions and validate the nonce.
+     *
+     * @param string $nonceAction Nonce action string tied to the form.
+     * @return void
+     */
     private static function guardCacheAction(string $nonceAction): void
     {
         if (!current_user_can('manage_options')) {
@@ -71,6 +97,12 @@ class SturdyChat_Admin_CacheActions
         check_admin_referer($nonceAction);
     }
 
+    /**
+     * Redirect back to the settings page with a status message.
+     *
+     * @param string $message Message to show in the admin notice.
+     * @return void
+     */
     private static function redirectSettingsWithMessage(string $message): void
     {
         wp_safe_redirect(add_query_arg(

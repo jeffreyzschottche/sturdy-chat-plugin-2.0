@@ -7,6 +7,12 @@ if (!defined('ABSPATH')) {
 
 final class SturdyChat_Debugger_ShowPrompt
 {
+    /**
+     * Log the final prompt sent to the LLM for inspection.
+     *
+     * @param array $data Payload containing question, context, model, etc.
+     * @return void
+     */
     public static function logPrompt(array $data): void
     {
         SturdyChat_Debugger::log('show_prompt_context', 'prompt', [

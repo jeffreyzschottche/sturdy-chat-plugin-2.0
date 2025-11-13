@@ -15,6 +15,12 @@ class SturdyChat_RAG
 {
     public const FALLBACK_ANSWER = 'Deze informatie bestaat niet in onze huidige kennisbank. Probeer je vraag specifieker te stellen of gebruik andere trefwoorden.';
 
+    /**
+     * Determine the fallback answer text, optionally using a configured override.
+     *
+     * @param array $settings Plugin settings array which may contain a custom fallback.
+     * @return string Text used when no contextual answer can be produced.
+     */
     public static function fallbackAnswer(array $settings = []): string
     {
         $fallback = isset($settings['fallback_answer']) ? trim((string) $settings['fallback_answer']) : '';
@@ -25,6 +31,12 @@ class SturdyChat_RAG
     }
 
     /**
+     * Generate an answer for a question using RAG retrieval plus chat completion.
+     *
+     * @param string      $question Natural-language question provided by the user.
+     * @param array       $settings Plugin configuration (embedding models, top_k, etc.).
+     * @param array       $hints    Optional hints (post IDs, URLs) to boost retrieval.
+     * @param string|null $traceId  Reserved identifier for future tracing use.
      * @return array{
      *   ok: bool,
      *   answer?: string,
@@ -62,8 +74,13 @@ class SturdyChat_RAG
     }
 
     /**
-     * Proxy method to keep backwards compatibility with existing usages.
+     * Proxy method to keep backwards compatibility with existing retrieval usages.
      *
+     * @param string      $query    Search query text.
+     * @param array       $settings Plugin settings array.
+     * @param int         $topK     Maximum number of documents to return.
+     * @param array       $hints    Optional hints (postId, URL) consumed by the retriever.
+     * @param string|null $traceId  Optional trace identifier.
      * @return array{context:string,sources:array<int,array{post_id:int,title:string,url:string,score:float}>}
      */
     public static function retrieve(string $query, array $settings, int $topK = 6, array $hints = [], ?string $traceId = null): array

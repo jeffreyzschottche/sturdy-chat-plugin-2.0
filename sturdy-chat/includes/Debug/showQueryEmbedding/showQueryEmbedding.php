@@ -7,13 +7,22 @@ if (!defined('ABSPATH')) {
 
 final class SturdyChat_Debugger_ShowQueryEmbedding
 {
+    /**
+     * Store detailed information about a retrieval pass (candidates, vectors, etc.).
+     *
+     * @param array $data Structured payload describing the retrieval pass.
+     * @return void
+     */
     public static function logRetrieval(array $data): void
     {
         SturdyChat_Debugger::log('show_query_embedding', 'query', $data);
     }
 
     /**
-     * @param array<array<string,mixed>> $rows
+     * Summarize candidate rows into a compact diagnostic array.
+     *
+     * @param array<array<string,mixed>> $rows Raw candidate rows.
+     * @param int                        $limit Number of entries to include.
      * @return array<int,array<string,mixed>>
      */
     public static function summarizeCandidates(array $rows, int $limit = 25): array

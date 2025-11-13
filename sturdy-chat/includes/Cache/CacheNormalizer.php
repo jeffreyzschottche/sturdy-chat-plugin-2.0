@@ -7,6 +7,12 @@ if (!defined('ABSPATH')) {
 
 class SturdyChat_Cache_Normalizer
 {
+    /**
+     * Normalise user questions by stripping markup, punctuation and extra spacing.
+     *
+     * @param string $question Raw question text.
+     * @return string Lowercase, trimmed string suitable for hashing/compare.
+     */
     public static function normalizeQuestion(string $question): string
     {
         $question = wp_strip_all_tags($question);
@@ -28,11 +34,23 @@ class SturdyChat_Cache_Normalizer
         return $question;
     }
 
+    /**
+     * Compute the cache hash for a normalised question string.
+     *
+     * @param string $normalized Normalised question text.
+     * @return string SHA-256 hash.
+     */
     public static function hash(string $normalized): string
     {
         return hash('sha256', $normalized);
     }
 
+    /**
+     * Determine the character length of a normalised question string.
+     *
+     * @param string $value Normalised string.
+     * @return int Character length (multibyte aware).
+     */
     public static function length(string $value): int
     {
         if (function_exists('mb_strlen')) {

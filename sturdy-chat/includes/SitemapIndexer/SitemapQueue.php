@@ -12,6 +12,12 @@ final class SturdyChat_SitemapIndexer_Queue
     private const OPT_TOTAL = 'sturdychat_sitemap_queue_total';
     private const LOCK_KEY  = 'sturdychat_sitemap_lock';
 
+    /**
+     * Replace the current queue with a new list of URLs and reset progress counters.
+     *
+     * @param string[] $urls Absolute URLs slated for indexing.
+     * @return void
+     */
     public static function enqueueUrls(array $urls): void
     {
         $urls = array_values(array_unique(array_filter(array_map('trim', $urls))));
@@ -20,6 +26,11 @@ final class SturdyChat_SitemapIndexer_Queue
         update_option(self::OPT_TOTAL, count($urls), false);
     }
 
+    /**
+     * Remove the persisted queue state and related progress metadata.
+     *
+     * @return void
+     */
     public static function clearQueue(): void
     {
         delete_option(self::OPT_QUEUE);
@@ -27,6 +38,13 @@ final class SturdyChat_SitemapIndexer_Queue
         delete_option(self::OPT_TOTAL);
     }
 
+    /**
+     * Process a slice of the queue while holding a transient lock.
+     *
+     * @param int      $batchSize Number of URLs to process in one run.
+     * @param callable $processor Callable that receives ($url, $settings) and returns bool|null.
+     * @return void
+     */
     public static function workBatch(int $batchSize, callable $processor): void
     {
         if (!self::acquireLock(300)) {
@@ -106,6 +124,12 @@ final class SturdyChat_SitemapIndexer_Queue
         }
     }
 
+    /**
+     * Attempt to acquire a transient lock for the sitemap worker.
+     *
+     * @param int $ttl Lifetime of the lock in seconds.
+     * @return bool True if lock acquired, false if another worker holds it.
+     */
     private static function acquireLock(int $ttl): bool
     {
         if (get_transient(self::LOCK_KEY)) {
@@ -115,6 +139,11 @@ final class SturdyChat_SitemapIndexer_Queue
         return true;
     }
 
+    /**
+     * Release the transient lock so another worker can run.
+     *
+     * @return void
+     */
     private static function releaseLock(): void
     {
         delete_transient(self::LOCK_KEY);

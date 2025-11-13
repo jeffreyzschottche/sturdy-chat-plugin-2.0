@@ -11,6 +11,12 @@ require_once __DIR__ . '/SitemapQueue.php';
 
 final class SturdyChat_SitemapIndexer
 {
+    /**
+     * Build or refresh the sitemap index queue based on the configured sitemap URL.
+     *
+     * @param array $settings Plugin settings array used to determine sitemap root.
+     * @return array{ok:bool,message:string} Status message describing the queueing result.
+     */
     public static function indexAll(array $settings): array
     {
         $root = trim((string) ($settings['sitemap_url'] ?? home_url('/sitemap_index.xml')));
@@ -53,11 +59,26 @@ final class SturdyChat_SitemapIndexer
         return ['ok' => true, 'message' => sprintf(__('Queued %d new URLs for background indexing.', 'sturdychat-chatbot'), count($urls))];
     }
 
+    /**
+     * Index a single URL immediately, typically triggered by save_post hooks.
+     *
+     * @param string $url              URL that should be fetched and embedded.
+     * @param array  $settings         Plugin settings array.
+     * @param bool   $force            Whether to force reindexing even if hashes match.
+     * @param array  $knownUrlVariants Optional list of URL variants to purge before inserting.
+     * @return bool|null True when inserted, null when skipped, false on HTTP failure.
+     */
     public static function indexSingleUrl(string $url, array $settings, bool $force = false, array $knownUrlVariants = []): ?bool
     {
         return SturdyChat_SitemapIndexer_PageIndexer::indexSingleUrl($url, $settings, $force, $knownUrlVariants);
     }
 
+    /**
+     * Process one batch from the sitemap queue, scheduling the worker again if needed.
+     *
+     * @param int $batchSize Number of URLs to process in this run.
+     * @return void
+     */
     public static function workBatch(int $batchSize = 50): void
     {
         SturdyChat_SitemapIndexer_Queue::workBatch($batchSize, function (string $url, array $settings): ?bool {
@@ -65,6 +86,12 @@ final class SturdyChat_SitemapIndexer
         });
     }
 
+    /**
+     * Remove URLs that are already indexed so we only queue new work.
+     *
+     * @param string[] $urls Candidate URLs extracted from the sitemap.
+     * @return string[] URLs that still need to be indexed.
+     */
     private static function filterUnindexedUrls(array $urls): array
     {
         global $wpdb;

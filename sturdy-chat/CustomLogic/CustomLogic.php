@@ -11,7 +11,7 @@ interface SturdyChat_CPT_Module
     /**
      * Enhances the content of a given WordPress post using specified parts and settings.
      *
-     * @param WP_Post $post The WordPress post object to be enriched.
+     * @param $post The WordPress post object to be enriched.
      * @param array $parts An array of content parts or elements to be utilized for enrichment.
      * @param array $settings An array of settings or configurations influencing the enrichment process.
      * @return array An array representing the enriched content.
@@ -56,7 +56,7 @@ class SturdyChat_CPTs
     /**
      * Enhances the content of a post by iterating through registered modules and applying their enrichment logic.
      *
-     * @param WP_Post $post The post object to be enriched.
+     * @param $post The post object to be enriched.
      * @param array $parts An array containing the current content parts to be processed.
      * @param array $settings An array of additional settings to customize the enrichment process.
      *

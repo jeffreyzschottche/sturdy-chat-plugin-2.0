@@ -18,8 +18,9 @@ class SturdyChat_Cache
     private const SIMILARITY_THRESHOLD = 0.99;
 
     /**
-     * Attempts to return a cached answer for the given question.
+     * Attempt to return a cached answer for the given question.
      *
+     * @param string $question User question to search for in the cache.
      * @return array{answer:string,sources:array<int,array{title:string,url:string,score:float}>}|null
      */
     public static function find(string $question): ?array
@@ -63,6 +64,8 @@ class SturdyChat_Cache
     /**
      * Persist an answer so it can be reused for near-identical future questions.
      *
+     * @param string                                      $question Question string.
+     * @param string                                      $answer   Answer text to cache.
      * @param array<int, array{title?:string,url?:string,score?:float}> $sources
      */
     public static function store(string $question, string $answer, array $sources = []): void
@@ -103,6 +106,7 @@ class SturdyChat_Cache
     /**
      * Provide normalized question and hash for reuse outside the cache class.
      *
+     * @param string $question Question text to normalise.
      * @return array{normalized:string,hash:string}
      */
     public static function normalizeForStorage(string $question): array
@@ -122,8 +126,8 @@ class SturdyChat_Cache
     /**
      * Remove cached answers whose sources include any of the provided URLs.
      *
-     * @param array<int, string> $urls
-     * @param array<int, string> $paths
+     * @param array<int,string> $urls  Absolute URLs to search for.
+     * @param array<int,string> $paths Normalised path strings to search for.
      * @return int Number of cache entries removed.
      */
     public static function purgeBySourceUrls(array $urls, array $paths = []): int
@@ -169,6 +173,7 @@ class SturdyChat_Cache
     /**
      * Sanitize raw JSON input from the editor and return a normalized JSON string for storage.
      *
+      * @param string $raw Raw JSON string from the editor.
      * @return array{ok:bool,value:string,message?:string}
      */
     public static function normalizeSourcesInput(string $raw): array
@@ -178,6 +183,9 @@ class SturdyChat_Cache
 
     /**
      * Pretty print sources JSON for the admin editor.
+     *
+     * @param string $sources Raw sources JSON stored in the DB.
+     * @return string Pretty-printed JSON string.
      */
     public static function formatSourcesForEditor(string $sources): string
     {

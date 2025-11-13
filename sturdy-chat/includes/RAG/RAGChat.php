@@ -8,6 +8,13 @@ if (!defined('ABSPATH')) {
 class SturdyChat_RAG_Chat
 {
     /**
+     * Call the chat completion endpoint to turn context into a natural-language answer.
+     *
+     * @param string $question        Original user question.
+     * @param string $context         Aggregated snippets returned by the retriever.
+     * @param array  $settings        Plugin settings containing API base, key, and model.
+     * @param float  $temperature     Temperature value passed through to the model.
+     * @param string $fallbackAnswer  Text returned when the context is empty or insufficient.
      * @return array{ok:bool,answer?:string,message?:string}
      */
     public static function generate(string $question, string $context, array $settings, float $temperature, string $fallbackAnswer): array

@@ -8,7 +8,10 @@ if (!defined('ABSPATH')) {
 final class SturdyChat_SitemapIndexer_Fetcher
 {
     /**
-     * @return string[]
+     * Fetch and parse the sitemap index, returning child sitemap URLs.
+     *
+     * @param string $url Absolute URL to the sitemap index.
+     * @return string[] List of child sitemap URLs, or an empty array on failure.
      */
     public static function fetchSitemapIndex(string $url): array
     {
@@ -63,7 +66,10 @@ final class SturdyChat_SitemapIndexer_Fetcher
     }
 
     /**
-     * @return array<int, array{loc:string,lastmod:?string}>
+     * Fetch and parse a child sitemap, returning URL nodes and optional lastmod values.
+     *
+     * @param string $url Child sitemap URL.
+     * @return array<int,array{loc:string,lastmod:?string}>
      */
     public static function fetchSitemapUrls(string $url): array
     {
@@ -124,6 +130,12 @@ final class SturdyChat_SitemapIndexer_Fetcher
         return $out;
     }
 
+    /**
+     * Perform a GET request with XML-friendly headers and return the response body.
+     *
+     * @param string $url Target URL to fetch.
+     * @return string|null Response body when successful, null otherwise.
+     */
     public static function fetchBody(string $url): ?string
     {
         $res = wp_remote_get($url, [
@@ -153,6 +165,12 @@ final class SturdyChat_SitemapIndexer_Fetcher
         return $body !== '' ? $body : null;
     }
 
+    /**
+     * Attempt to parse an XML string into a SimpleXMLElement.
+     *
+     * @param string $body Raw XML string.
+     * @return \SimpleXMLElement|null Parsed XML or null when parsing fails.
+     */
     public static function loadXml(string $body): ?\SimpleXMLElement
     {
         libxml_use_internal_errors(true);

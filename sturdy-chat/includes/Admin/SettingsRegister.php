@@ -7,6 +7,11 @@ if (!defined('ABSPATH')) {
 
 class SturdyChat_Admin_SettingsRegister
 {
+    /**
+     * Register all settings sections and fields for the Sturdy Chat admin UI.
+     *
+     * @return void
+     */
     public static function register(): void
     {
         register_setting('sturdychat_settings_group', 'sturdychat_settings', [
@@ -52,6 +57,12 @@ class SturdyChat_Admin_SettingsRegister
         );
     }
 
+    /**
+     * Sanitize and normalise the settings array coming from the form submission.
+     *
+     * @param array|string $in Raw settings payload.
+     * @return array Sanitised settings ready for storage.
+     */
     public static function sanitizeSettings($in): array
     {
         $in  = is_array($in) ? $in : [];
@@ -134,11 +145,21 @@ class SturdyChat_Admin_SettingsRegister
         return $out;
     }
 
+    /**
+     * Render the provider field (currently static to OpenAI).
+     *
+     * @return void
+     */
     public static function fieldProvider(): void
     {
         echo '<strong>OpenAI</strong> (MVP).';
     }
 
+    /**
+     * Render the OpenAI base URL field.
+     *
+     * @return void
+     */
     public static function fieldOpenaiBase(): void
     {
         $s = get_option('sturdychat_settings', []);
@@ -148,6 +169,11 @@ class SturdyChat_Admin_SettingsRegister
         );
     }
 
+    /**
+     * Render the OpenAI API key field.
+     *
+     * @return void
+     */
     public static function fieldOpenaiKey(): void
     {
         $s = get_option('sturdychat_settings', []);
@@ -158,6 +184,11 @@ class SturdyChat_Admin_SettingsRegister
         echo '<p class="description">Server-side only.</p>';
     }
 
+    /**
+     * Render the embedding model input.
+     *
+     * @return void
+     */
     public static function fieldEmbedModel(): void
     {
         $s   = get_option('sturdychat_settings', []);
@@ -165,6 +196,11 @@ class SturdyChat_Admin_SettingsRegister
         printf('<input type="text" name="sturdychat_settings[embed_model]" value="%s" class="regular-text" />', esc_attr($val));
     }
 
+    /**
+     * Render the chat model input.
+     *
+     * @return void
+     */
     public static function fieldChatModel(): void
     {
         $s   = get_option('sturdychat_settings', []);
@@ -172,12 +208,22 @@ class SturdyChat_Admin_SettingsRegister
         printf('<input type="text" name="sturdychat_settings[chat_model]" value="%s" class="regular-text" />', esc_attr($val));
     }
 
+    /**
+     * Render the top_k field.
+     *
+     * @return void
+     */
     public static function fieldTopK(): void
     {
         $s = get_option('sturdychat_settings', []);
         printf('<input type="number" min="1" max="12" name="sturdychat_settings[top_k]" value="%d" class="small-text" />', (int) ($s['top_k'] ?? 6));
     }
 
+    /**
+     * Render the temperature field.
+     *
+     * @return void
+     */
     public static function fieldTemperature(): void
     {
         $s = get_option('sturdychat_settings', []);
@@ -187,6 +233,11 @@ class SturdyChat_Admin_SettingsRegister
         );
     }
 
+    /**
+     * Render the post type selection UI with drag/drop ordering.
+     *
+     * @return void
+     */
     public static function fieldPostTypes(): void
     {
         $s    = get_option('sturdychat_settings', []);

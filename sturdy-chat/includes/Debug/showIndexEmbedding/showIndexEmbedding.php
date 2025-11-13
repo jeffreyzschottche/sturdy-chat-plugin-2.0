@@ -7,6 +7,12 @@ if (!defined('ABSPATH')) {
 
 final class SturdyChat_Debugger_ShowIndexEmbedding
 {
+    /**
+     * Log a single embedding chunk created during indexing.
+     *
+     * @param array $data Payload describing the chunk (text, embedding, metadata).
+     * @return void
+     */
     public static function logChunk(array $data): void
     {
         SturdyChat_Debugger::log('show_index_embedding', 'index', [

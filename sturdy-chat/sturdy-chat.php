@@ -62,8 +62,11 @@ add_action('sturdychat_sitemap_worker', function (): void {
 });
 
 /**
- * Plan a single-run from sitemap worker.
+ * Schedule the sitemap worker to run once after a short delay.
  *
+ * @param int $delay Number of seconds to wait before scheduling the worker.
+ *                   Defaults to 60 seconds to avoid immediate re-entry.
+ * @return void
  */
 function sturdychat_schedule_sitemap_worker(int $delay = 60): void
 {
@@ -77,9 +80,9 @@ function sturdychat_schedule_sitemap_worker(int $delay = 60): void
 
 
 /**
- * Retrieves a list of all public post types, excluding 'attachment'.
+ * Return all public post type slugs except for attachments.
  *
- * @return array An array of public post type names, excluding 'attachment'.
+ * @return string[] Array of post type names that should be considered for indexing.
  */
 function sturdychat_all_public_types(): array
 {
@@ -89,9 +92,9 @@ function sturdychat_all_public_types(): array
 }
 
 /**
- * Processes the sitemap queue immediately by repeatedly running the worker until it is empty.
+ * Drain the sitemap queue synchronously by repeatedly invoking the worker.
  *
- * @param int $batchSize Number of URLs to process per worker run.
+ * @param int $batchSize Number of URLs processed per worker invocation.
  * @return void
  */
 function sturdychat_process_sitemap_queue_until_complete(int $batchSize = 50): void
@@ -121,11 +124,11 @@ function sturdychat_process_sitemap_queue_until_complete(int $batchSize = 50): v
 }
 
 /**
- * Automatically triggers sitemap indexing whenever a public post is saved.
+ * Trigger sitemap indexing for a post whenever it is saved or updated.
  *
- * @param int     $post_id The post ID being saved.
- * @param WP_Post $post    The post object.
- * @param bool    $update  Whether this is an existing post being updated.
+ * @param int     $post_id Post identifier emitted by the save action.
+ * @param WP_Post $post    Post object instance or null.
+ * @param bool    $update  Indicates whether this save is an update.
  * @return void
  */
 function sturdychat_trigger_sitemap_index_on_save(int $post_id, $post, bool $update): void
@@ -175,9 +178,9 @@ function sturdychat_trigger_sitemap_index_on_save(int $post_id, $post, bool $upd
 add_action('save_post', 'sturdychat_trigger_sitemap_index_on_save', 20, 3);
 
 /**
- * Cleanup helper: remove indexed chunks and cached answers when a post is deleted.
+ * Remove stored embeddings and cached answers for a post that is being deleted.
  *
- * @param int $post_id
+ * @param int $post_id Identifier of the post being removed or trashed.
  * @return void
  */
 function sturdychat_handle_post_delete(int $post_id): void
@@ -233,10 +236,10 @@ add_action('before_delete_post', 'sturdychat_handle_post_delete', 10, 1);
 add_action('wp_trash_post', 'sturdychat_handle_post_delete', 10, 1);
 
 /**
- * Collect URL and path variants for a post so we can purge chunks/caches reliably.
+ * Build a list of canonical URLs and normalized paths for a post.
  *
- * @param WP_Post $post
- * @return array{urls:array<int,string>,paths:array<int,string>}
+ * @param WP_Post $post Post instance to analyse.
+ * @return array{urls:string[],paths:string[]} URL variants and path fragments used for purging.
  */
 function sturdychat_collect_post_url_targets(WP_Post $post): array
 {
@@ -326,7 +329,10 @@ function sturdychat_collect_post_url_targets(WP_Post $post): array
 }
 
 /**
- * Normalize a URL path to a consistent form (leading slash, no trailing slash, lower-case).
+ * Normalize a URL path so comparisons ignore trailing slashes and case.
+ *
+ * @param string $path Raw path to normalize.
+ * @return string Normalized path beginning with a slash.
  */
 function sturdychat_normalize_url_path(string $path): string
 {
@@ -345,6 +351,13 @@ function sturdychat_normalize_url_path(string $path): string
     return strtolower($path);
 }
 
+/**
+ * Ensure a hex color is valid or fall back to a default.
+ *
+ * @param string|null $color   User provided color string.
+ * @param string      $default Hex string used when the provided color is invalid.
+ * @return string Sanitized color value.
+ */
 function sturdychat_sanitize_hex_color_default(?string $color, string $default): string
 {
     $color = (string) $color;
@@ -361,6 +374,12 @@ function sturdychat_sanitize_hex_color_default(?string $color, string $default):
     return $default;
 }
 
+/**
+ * Resolve UI customisation settings, providing safe defaults.
+ *
+ * @param array|null $settings Optional base settings array (falls back to option).
+ * @return array{text_color:string,pill_color:string,sources_limit:int,style_variant:string}
+ */
 function sturdychat_get_ui_settings(?array $settings = null): array
 {
     $settings = $settings ?? get_option('sturdychat_settings', []);
@@ -391,6 +410,13 @@ function sturdychat_get_ui_settings(?array $settings = null): array
  * @param array<int, array{title:string,url:string,score:float}> $sources
  * @return array<int, array{title:string,url:string,score:float}>
  */
+/**
+ * Limit the number of sources that will be displayed or returned.
+ *
+ * @param array<int,array<string,mixed>> $sources Raw source array.
+ * @param int                            $limit   Maximum number of entries to keep.
+ * @return array<int,array<string,mixed>> Trimmed list of sources.
+ */
 function sturdychat_limit_sources(array $sources, int $limit): array
 {
     if ($limit < 1) {
@@ -401,10 +427,12 @@ function sturdychat_limit_sources(array $sources, int $limit): array
 }
 
 /**
- * Normalize source entries so both the REST endpoint and shortcode can reuse them.
+ * Normalize raw source data so both the REST endpoint and shortcode can reuse it.
  *
- * @param array<int, array{title?:string,url?:string,score?:float}> $sources
- * @return array<int, array{title:string,url:string,score:float}>
+ * @param array<int,array{title?:string,url?:string,score?:float}> $sources Raw sources from upstream calls.
+ * @param string|null                                             $fallbackAnswer Fallback answer configured in settings.
+ * @param string                                                  $answer         The final answer string returned to the user.
+ * @return array<int,array{title:string,url:string,score:float}> Normalized source entries.
  */
 function sturdychat_prepare_sources(array $sources, ?string $fallbackAnswer, string $answer): array
 {
@@ -437,8 +465,9 @@ function sturdychat_prepare_sources(array $sources, ?string $fallbackAnswer, str
 }
 
 /**
- * Shared question handler that powers both shortcode output and the REST endpoint.
+ * Generate or retrieve an answer for a question, used by both shortcode and REST API.
  *
+ * @param string $question Natural-language question submitted by the user.
  * @return array{answer:string,sources:array<int,array{title:string,url:string,score:float}>}|\WP_Error
  */
 function sturdychat_answer_question(string $question)

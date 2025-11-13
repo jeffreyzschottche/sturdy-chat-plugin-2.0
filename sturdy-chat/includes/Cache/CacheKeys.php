@@ -8,9 +8,11 @@ if (!defined('ABSPATH')) {
 class SturdyChat_Cache_Keys
 {
     /**
-     * @param array<int,string> $urls
-     * @param array<int,string> $paths
-     * @return array<string,bool>
+     * Build a map of target keys derived from URLs and paths for fast matching.
+     *
+     * @param array<int,string> $urls  Absolute URLs.
+     * @param array<int,string> $paths Normalised paths.
+     * @return array<string,bool> Map used for membership checks.
      */
     public static function buildTargets(array $urls, array $paths): array
     {
@@ -33,8 +35,11 @@ class SturdyChat_Cache_Keys
     }
 
     /**
-     * @param string[] $keys
-     * @param array<string,bool> $targets
+     * Check whether any of the provided keys intersect with the target map.
+     *
+     * @param string[]            $keys    Keys extracted from a source.
+     * @param array<string,bool> $targets Target lookup map.
+     * @return bool True if there is a match.
      */
     public static function matchAny(array $keys, array $targets): bool
     {
@@ -48,7 +53,10 @@ class SturdyChat_Cache_Keys
     }
 
     /**
-     * @return array<int,string>
+     * Extract URL and path keys from a single URL string.
+     *
+     * @param string $url Source URL.
+     * @return array<int,string> List of keys representing URL and path.
      */
     public static function extract(string $url): array
     {
@@ -67,6 +75,12 @@ class SturdyChat_Cache_Keys
         return array_values(array_unique($keys));
     }
 
+    /**
+     * Normalise a URL into a consistent key (host + path + sorted query).
+     *
+     * @param string $url Source URL.
+     * @return string Normalised key or empty string when invalid.
+     */
     private static function normalizeUrlKey(string $url): string
     {
         $url = trim($url);
@@ -108,6 +122,12 @@ class SturdyChat_Cache_Keys
         return $host . $path . $query;
     }
 
+    /**
+     * Derive a normalised path key from a full URL or bare path string.
+     *
+     * @param string $value Path or full URL.
+     * @return string Normalised lowercase path.
+     */
     private static function normalizePathKey(string $value): string
     {
         $value = trim($value);

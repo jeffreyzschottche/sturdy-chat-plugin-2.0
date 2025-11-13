@@ -7,6 +7,15 @@ if (!defined('ABSPATH')) {
 
 final class SturdyChat_SitemapIndexer_PageIndexer
 {
+    /**
+     * Index a single URL immediately, optionally forcing re-insertion.
+     *
+     * @param string $url             Canonical URL to index.
+     * @param array  $settings        Plugin settings controlling chunking/embedding.
+     * @param bool   $force           Whether to skip hash checks and always reinsert.
+     * @param array  $knownVariants   Optional url variants to purge beforehand.
+     * @return bool|null True when new rows inserted, null if skipped, false on HTTP failure.
+     */
     public static function indexSingleUrl(string $url, array $settings, bool $force = false, array $knownVariants = []): ?bool
     {
         $url = trim($url);
@@ -32,11 +41,28 @@ final class SturdyChat_SitemapIndexer_PageIndexer
         return self::indexUrl($url, null, $settings, $force, array_keys($variants));
     }
 
+    /**
+     * Convenience wrapper used by the queue worker to process one URL.
+     *
+     * @param string $url      URL fetched from the queue.
+     * @param array  $settings Plugin settings array.
+     * @return bool|null Result of {@see indexUrl()}.
+     */
     public static function processUrl(string $url, array $settings): ?bool
     {
         return self::indexUrl($url, null, $settings, false, [$url]);
     }
 
+    /**
+     * Fetch, extract, chunk, embed, and persist the contents of a single URL.
+     *
+     * @param string      $url        URL to index.
+     * @param string|null $lastmod    Optional last-modified timestamp from sitemap.
+     * @param array       $settings   Plugin settings array.
+     * @param bool        $force      Whether to reinsert even if hashes match.
+     * @param array       $deleteUrls URL variants to purge before inserting.
+     * @return bool|null True when inserted, null if skipped, false on fetch error.
+     */
     private static function indexUrl(string $url, ?string $lastmod, array $settings, bool $force = false, array $deleteUrls = []): ?bool
     {
         unset($lastmod); // reserved for future use.
@@ -189,6 +215,13 @@ final class SturdyChat_SitemapIndexer_PageIndexer
         return true;
     }
 
+    /**
+     * Helper to extract the first matching text node for a given XPath.
+     *
+     * @param \DOMXPath $xp    XPath instance to query.
+     * @param string    $xpath XPath expression pointing to an attribute or node text.
+     * @return string|null Trimmed text content or null when not found.
+     */
     private static function firstText(\DOMXPath $xp, string $xpath): ?string
     {
         $nodes = $xp->query($xpath);
@@ -198,6 +231,12 @@ final class SturdyChat_SitemapIndexer_PageIndexer
         return null;
     }
 
+    /**
+     * Guess a CPT slug based on the first segment of the path component in the URL.
+     *
+     * @param string $url URL whose path should be analysed.
+     * @return string Sanitized CPT slug (defaults to "page").
+     */
     private static function guessCpt(string $url): string
     {
         $path = parse_url($url, PHP_URL_PATH) ?? '/';
@@ -209,6 +248,13 @@ final class SturdyChat_SitemapIndexer_PageIndexer
         return sanitize_key($parts[0] ?? 'page');
     }
 
+    /**
+     * Split text into sentence-aware chunks limited by character count.
+     *
+     * @param string $text     Raw text content to chunk.
+     * @param int    $maxChars Maximum length of each chunk.
+     * @return string[] Array of trimmed chunk strings.
+     */
     private static function chunkText(string $text, int $maxChars): array
     {
         $text = preg_replace('/\s+/', ' ', $text);

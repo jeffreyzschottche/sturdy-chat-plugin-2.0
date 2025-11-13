@@ -8,6 +8,13 @@ if (!defined('ABSPATH')) {
 class SturdyChat_RAG_Retriever
 {
     /**
+     * Retrieve relevant snippets, score them, and assemble context for RAG.
+     *
+     * @param string      $query    User query.
+     * @param array       $settings Plugin settings array.
+     * @param int         $topK     Number of documents/snippets to include.
+     * @param array       $hints    Optional hints to boost retrieval.
+     * @param string|null $traceId  Reserved identifier for future tracing support.
      * @return array{context:string,sources:array<int,array{post_id:int,title:string,url:string,score:float}>}
      */
     public static function retrieve(
@@ -331,7 +338,12 @@ class SturdyChat_RAG_Retriever
         ];
     }
 
-    /** @return array{must_terms:string[],must_phrases:string[],numbers:string[],anti_terms:string[]} */
+    /**
+     * Analyse the query to derive must-match terms, phrases, numbers and anti-terms.
+     *
+     * @param string $question User-provided query string.
+     * @return array{must_terms:string[],must_phrases:string[],numbers:string[],anti_terms:string[]}
+     */
     private static function buildConstraints(string $question): array
     {
         $text = mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $question)));
@@ -362,6 +374,12 @@ class SturdyChat_RAG_Retriever
         ];
     }
 
+    /**
+     * Attempt to guess a CPT slug (e.g. nieuws, partners) based on query keywords.
+     *
+     * @param string $question User query.
+     * @return string|null CPT hint or null when no obvious keyword is found.
+     */
     private static function inferCptHint(string $question): ?string
     {
         $text = mb_strtolower($question);
@@ -400,6 +418,12 @@ class SturdyChat_RAG_Retriever
         return null;
     }
 
+    /**
+     * Extract Dutch date expressions or ISO dates from the query.
+     *
+     * @param string $question Query text.
+     * @return array{iso:string,text:string} ISO date plus textual representation (lowercase).
+     */
     private static function parseDutchDate(string $question): array
     {
         $months = [
@@ -431,6 +455,15 @@ class SturdyChat_RAG_Retriever
         return ['iso' => '', 'text' => ''];
     }
 
+    /**
+     * Fetch lexical candidates filtered by CPT to honour routing hints.
+     *
+     * @param string $table Database table containing sitemap embeddings.
+     * @param string $cpt   CPT slug being targeted.
+     * @param string $query User query text.
+     * @param int    $limit Maximum number of results to return.
+     * @return array<int,array<string,mixed>> Raw rows from the database.
+     */
     private static function lexicalCandidatesByCpt(string $table, string $cpt, string $query = '', int $limit = 400): array
     {
         global $wpdb;
@@ -524,6 +557,13 @@ class SturdyChat_RAG_Retriever
         return $rows;
     }
 
+    /**
+     * Fetch lexical candidates from a table without CPT routing (general fallback).
+     *
+     * @param string $table Table name to query.
+     * @param string $query Query string to match via FULLTEXT or LIKE.
+     * @return array<int,array<string,mixed>> Raw database rows.
+     */
     private static function lexicalCandidatesFromTable(string $table, string $query): array
     {
         global $wpdb;
@@ -621,6 +661,15 @@ class SturdyChat_RAG_Retriever
         return $rows;
     }
 
+    /**
+     * Fetch lexical candidates constrained by CPT/date when other strategies fail.
+     *
+     * @param string      $table   Table name.
+     * @param string|null $cptHint Optional CPT slug.
+     * @param array       $dateHint Parsed date information from {@see parseDutchDate()}.
+     * @param int         $limit   Maximum rows to retrieve.
+     * @return array<int,array<string,mixed>>
+     */
     private static function lexicalCandidatesByCptDate(string $table, ?string $cptHint, array $dateHint, int $limit = 400): array
     {
         global $wpdb;
@@ -673,6 +722,12 @@ class SturdyChat_RAG_Retriever
         return $rows;
     }
 
+    /**
+     * Compute per-CPT priority boosts based on the configured order.
+     *
+     * @param array $settings Plugin settings containing index_post_types_order.
+     * @return array<string,float> Map of CPT slug to boost value.
+     */
     private static function buildCptPriorityBoosts(array $settings): array
     {
         $orderList = [];
@@ -721,11 +776,25 @@ class SturdyChat_RAG_Retriever
         return $map;
     }
 
+    /**
+     * Normalise BM25 scores into the range [0, 1] using a logistic curve.
+     *
+     * @param float $value Raw BM25 score.
+     * @return float Normalised score.
+     */
     private static function normalizeBm25(float $value): float
     {
         return max(0.0, min(1.0, 1.0 / (1.0 + exp(-0.5 * ($value - 5.0)))));
     }
 
+    /**
+     * Calculate how many required terms/phrases the text covers.
+     *
+     * @param string   $text        Lowercase text snippet.
+     * @param string[] $mustTerms   Required single terms.
+     * @param string[] $mustPhrases Required multi-word phrases.
+     * @return float Ratio of matched requirements.
+     */
     private static function coverageScore(string $text, array $mustTerms, array $mustPhrases): float
     {
         $lower = mb_strtolower($text);
@@ -759,6 +828,13 @@ class SturdyChat_RAG_Retriever
         return $hits / $need;
     }
 
+    /**
+     * Check whether all numeric patterns from the query appear in the text.
+     *
+     * @param string   $text    Text snippet.
+     * @param string[] $numbers Normalised numeric patterns extracted from the query.
+     * @return bool True when all numbers appear, false otherwise.
+     */
     private static function numericOk(string $text, array $numbers): bool
     {
         if (empty($numbers)) {
@@ -777,6 +853,15 @@ class SturdyChat_RAG_Retriever
         return true;
     }
 
+    /**
+     * Extract a snippet of text centred around the earliest matched term or phrase.
+     *
+     * @param string   $content     Full text content.
+     * @param string[] $mustTerms   Required single terms.
+     * @param string[] $mustPhrases Required phrases.
+     * @param int      $size        Maximum length of the snippet.
+     * @return string Snippet trimmed with ellipsis when necessary.
+     */
     private static function bestSnippet(string $content, array $mustTerms, array $mustPhrases, int $size = 650): string
     {
         $text = trim((string) preg_replace('/\s+/u', ' ', $content));
@@ -807,6 +892,12 @@ class SturdyChat_RAG_Retriever
         return ($start > 0 ? '…' : '') . $snippet . (mb_strlen($text) > $start + $size ? '…' : '');
     }
 
+    /**
+     * Cache and return table columns so later queries can detect column presence.
+     *
+     * @param string $table Table name.
+     * @return array<string,true> Map of lowercase column names.
+     */
     private static function tableColumns(string $table): array
     {
         static $cache = [];
@@ -831,6 +922,12 @@ class SturdyChat_RAG_Retriever
         return $columns;
     }
 
+    /**
+     * Inspect fulltext indexes on the table and list the columns involved.
+     *
+     * @param string $table Table name.
+     * @return array<string,string[]> Map of index name to column list.
+     */
     private static function fulltextColumnsByIndex(string $table): array
     {
         global $wpdb;
@@ -850,6 +947,13 @@ class SturdyChat_RAG_Retriever
         return $byKey;
     }
 
+    /**
+     * Determine whether a URL corresponds to the CPT "hub" path.
+     *
+     * @param string $url Candidate URL.
+     * @param string $cpt CPT slug.
+     * @return bool True when the path matches the CPT hub URL.
+     */
     private static function isHubUrl(string $url, string $cpt): bool
     {
         $path = parse_url($url, PHP_URL_PATH) ?? '';

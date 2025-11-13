@@ -7,6 +7,11 @@ if (!defined('ABSPATH')) {
 
 class SturdyChat_Admin_Menu
 {
+    /**
+     * Register the top-level menu and cached-answers submenu.
+     *
+     * @return void
+     */
     public static function register(): void
     {
         add_menu_page(
