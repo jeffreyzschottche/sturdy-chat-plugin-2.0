@@ -367,6 +367,9 @@ register_activation_hook(__FILE__, function () {
             'batch_size' => 25,
             'chunk_chars' => 1200,
             'chat_title' => 'Stel je vraag',
+            'fallback_answer' => class_exists('SturdyChat_RAG')
+                ? SturdyChat_RAG::FALLBACK_ANSWER
+                : 'Deze informatie bestaat niet in onze huidige kennisbank. Probeer je vraag specifieker te stellen of gebruik andere trefwoorden.',
         ]);
     }
     if (false === get_option('sturdychat_cache_enabled', false)) {

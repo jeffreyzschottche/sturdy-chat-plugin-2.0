@@ -46,6 +46,14 @@ class SturdyChat_REST
         $s = get_option('sturdychat_settings', []);
         $cacheEnabled = (bool) get_option('sturdychat_cache_enabled', 1);
         $cacheAvailable = $cacheEnabled && class_exists('SturdyChat_Cache');
+        $configuredFallback = null;
+        if (class_exists('SturdyChat_RAG')) {
+            if (method_exists('SturdyChat_RAG', 'fallbackAnswer')) {
+                $configuredFallback = SturdyChat_RAG::fallbackAnswer($s);
+            } elseif (defined('SturdyChat_RAG::FALLBACK_ANSWER')) {
+                $configuredFallback = SturdyChat_RAG::FALLBACK_ANSWER;
+            }
+        }
 
         // Get Query from ?q or JSON body {question:"..."}
         $q = $req->get_param('q');
@@ -82,10 +90,7 @@ class SturdyChat_REST
 //                // Paste Bron/Source under the answer
                 $answer = (string) $maybe['answer'];
                 $sources = isset($maybe['sources']) && is_array($maybe['sources']) ? $maybe['sources'] : [];
-                $fallbackAnswer = (class_exists('SturdyChat_RAG') && defined('SturdyChat_RAG::FALLBACK_ANSWER'))
-                    ? SturdyChat_RAG::FALLBACK_ANSWER
-                    : null;
-                $isFallback = ($fallbackAnswer !== null && $answer === $fallbackAnswer);
+                $isFallback = ($configuredFallback !== null && $answer === $configuredFallback);
                 if ($isFallback) {
                     $sources = [];
                 }
@@ -119,10 +124,7 @@ class SturdyChat_REST
 
             $answer  = (string) ($out['answer'] ?? '');
             $sources = isset($out['sources']) && is_array($out['sources']) ? $out['sources'] : [];
-            $fallbackAnswer = (class_exists('SturdyChat_RAG') && defined('SturdyChat_RAG::FALLBACK_ANSWER'))
-                ? SturdyChat_RAG::FALLBACK_ANSWER
-                : null;
-            $isFallback = ($fallbackAnswer !== null && $answer === $fallbackAnswer);
+            $isFallback = ($configuredFallback !== null && $answer === $configuredFallback);
             if ($isFallback) {
                 $sources = [];
             }

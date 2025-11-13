@@ -79,6 +79,7 @@ class SturdyChat_Admin
         add_settings_field('batch_size', __('Batch size', 'sturdychat-chatbot'), [__CLASS__, 'fieldBatchSize'], 'sturdychat', 'sturdychat_main');
         add_settings_field('chunk_chars', __('Chunk size (characters)', 'sturdychat-chatbot'), [__CLASS__, 'fieldChunkChars'], 'sturdychat', 'sturdychat_main');
         add_settings_field('chat_title', __('Chat title', 'sturdychat-chatbot'), [__CLASS__, 'fieldChatTitle'], 'sturdychat', 'sturdychat_main');
+        add_settings_field('fallback_answer', __('Fallback answer', 'sturdychat-chatbot'), [__CLASS__, 'fieldFallbackAnswer'], 'sturdychat', 'sturdychat_main');
 
         // New: Sitemap URL
         add_settings_field(
@@ -165,6 +166,11 @@ class SturdyChat_Admin
         $out['batch_size']         = max(1, (int) ($in['batch_size'] ?? 25));
         $out['chunk_chars']        = max(400, min(4000, (int) ($in['chunk_chars'] ?? 1200)));
         $out['chat_title']         = !empty($in['chat_title']) ? sanitize_text_field($in['chat_title']) : 'Stel je vraag';
+        $fallbackDefault           = class_exists('SturdyChat_RAG')
+            ? SturdyChat_RAG::FALLBACK_ANSWER
+            : 'Deze informatie bestaat niet in onze huidige kennisbank. Probeer je vraag specifieker te stellen of gebruik andere trefwoorden.';
+        $fallbackInput = isset($in['fallback_answer']) ? sanitize_textarea_field((string) $in['fallback_answer']) : '';
+        $out['fallback_answer'] = $fallbackInput !== '' ? $fallbackInput : $fallbackDefault;
 
         // New
         $out['sitemap_url'] = isset($in['sitemap_url']) ? esc_url_raw($in['sitemap_url']) : home_url('/sitemap_index.xml');
@@ -464,6 +470,18 @@ class SturdyChat_Admin
     {
         $s = get_option('sturdychat_settings', []);
         printf('<input type="text" name="sturdychat_settings[chat_title]" value="%s" class="regular-text" />', esc_attr($s['chat_title'] ?? 'Stel je vraag'));
+    }
+
+    /**
+     * Renders a textarea to configure the fallback answer when no context is available.
+     */
+    public static function fieldFallbackAnswer(): void
+    {
+        $s = get_option('sturdychat_settings', []);
+        $default = class_exists('SturdyChat_RAG') ? SturdyChat_RAG::FALLBACK_ANSWER : '';
+        $value = isset($s['fallback_answer']) && $s['fallback_answer'] !== '' ? (string) $s['fallback_answer'] : $default;
+        echo '<textarea name="sturdychat_settings[fallback_answer]" rows="3" class="large-text code">' . esc_textarea($value) . '</textarea>';
+        echo '<p class="description">' . esc_html__('Dit antwoord tonen we wanneer er geen context gevonden wordt.', 'sturdychat-chatbot') . '</p>';
     }
 
     /**

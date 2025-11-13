@@ -18,6 +18,18 @@ class SturdyChat_RAG
     public const FALLBACK_ANSWER = 'Deze informatie bestaat niet in onze huidige kennisbank. Probeer je vraag specifieker te stellen of gebruik andere trefwoorden.';
 
     /**
+     * Determine the fallback answer text, optionally using a configured override.
+     */
+    public static function fallbackAnswer(array $settings = []): string
+    {
+        $fallback = isset($settings['fallback_answer']) ? trim((string) $settings['fallback_answer']) : '';
+        if ($fallback !== '') {
+            return $fallback;
+        }
+        return self::FALLBACK_ANSWER;
+    }
+
+    /**
      * Antwoordt op de vraag met uitsluitend context uit de index (closed-book).
      *
      * @return array{
@@ -31,6 +43,7 @@ class SturdyChat_RAG
     {
         $topK = (int) ($s['top_k'] ?? 6);
         $temp = (float) ($s['temperature'] ?? 0.2);
+        $fallbackAnswer = self::fallbackAnswer($s);
 
         $retr = self::retrieve($question, $s, $topK, $hints, $traceId);
         $ctx  = trim((string) ($retr['context'] ?? ''));
@@ -38,7 +51,7 @@ class SturdyChat_RAG
         if ($ctx === '') {
             return [
                 'ok'      => true,
-                'answer'  => self::FALLBACK_ANSWER,
+                'answer'  => $fallbackAnswer,
                 'sources' => [],
             ];
         }
@@ -52,7 +65,6 @@ class SturdyChat_RAG
         }
 
         $today = function_exists('wp_date') ? wp_date('Y-m-d') : date_i18n('Y-m-d');
-        $fallbackAnswer = self::FALLBACK_ANSWER;
 
         $sys = "Je antwoordt uitsluitend met feiten die letterlijk uit de CONTEXT-snippets blijken.
 - Geen externe kennis of aannames.
