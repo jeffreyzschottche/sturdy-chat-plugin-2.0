@@ -263,6 +263,10 @@ class SturdyChat_RAG_Retriever
                 continue;
             }
 
+            $rank      = $picked + 1;
+            $score     = isset($best[0]['final']) ? (float) $best[0]['final'] : 0.0;
+            $scoreText = sprintf('Bron #%d (score %.4f)', $rank, $score);
+
             if (($first['_src'] ?? '') === 'sitemap') {
                 $url   = (string) ($first['url'] ?? '');
                 $title = (string) ($first['title'] ?? $url);
@@ -272,7 +276,7 @@ class SturdyChat_RAG_Retriever
 
                 foreach ($best as $row) {
                     $snippet      = self::bestSnippet((string) $row['content'], $mustTerms, $mustPhrases, 650);
-                    $contextParts[] = '### ' . $title . ' — ' . $url . "\n" . $snippet;
+                    $contextParts[] = sprintf('### %s — %s — %s' . "\n" . '%s', $scoreText, $title, $url, $snippet);
                 }
 
                 $sources[] = [
@@ -293,7 +297,7 @@ class SturdyChat_RAG_Retriever
 
                 foreach ($best as $row) {
                     $snippet      = self::bestSnippet((string) $row['content'], $mustTerms, $mustPhrases, 650);
-                    $contextParts[] = '### ' . $title . ' — ' . $url . "\n" . $snippet;
+                    $contextParts[] = sprintf('### %s — %s — %s' . "\n" . '%s', $scoreText, $title, $url, $snippet);
                 }
 
                 $sources[] = [
