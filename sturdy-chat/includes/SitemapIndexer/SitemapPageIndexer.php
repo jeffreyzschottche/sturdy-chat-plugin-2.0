@@ -32,9 +32,9 @@ final class SturdyChat_SitemapIndexer_PageIndexer
         return self::indexUrl($url, null, $settings, $force, array_keys($variants));
     }
 
-    public static function processUrl(string $url, array $settings): void
+    public static function processUrl(string $url, array $settings): ?bool
     {
-        self::indexUrl($url, null, $settings, false, [$url]);
+        return self::indexUrl($url, null, $settings, false, [$url]);
     }
 
     private static function indexUrl(string $url, ?string $lastmod, array $settings, bool $force = false, array $deleteUrls = []): ?bool
@@ -156,6 +156,17 @@ final class SturdyChat_SitemapIndexer_PageIndexer
 
         foreach ($chunks as $index => $chunk) {
             $vector = SturdyChat_Embedder::embed($chunk, $settings);
+            if (class_exists('SturdyChat_Debugger') && SturdyChat_Debugger::isEnabled('show_index_embedding')) {
+                SturdyChat_Debugger_ShowIndexEmbedding::logChunk([
+                    'post_id'     => 0,
+                    'chunk_index' => $index,
+                    'chunk'       => $chunk,
+                    'embedding'   => $vector,
+                    'hash'        => $hash,
+                    'url'         => $url,
+                    'source'      => 'sitemap',
+                ]);
+            }
             $wpdb->insert(
                 $table,
                 [

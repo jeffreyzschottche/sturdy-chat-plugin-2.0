@@ -60,8 +60,8 @@ final class SturdyChat_SitemapIndexer
 
     public static function workBatch(int $batchSize = 50): void
     {
-        SturdyChat_SitemapIndexer_Queue::workBatch($batchSize, function (string $url, array $settings): void {
-            SturdyChat_SitemapIndexer_PageIndexer::processUrl($url, $settings);
+        SturdyChat_SitemapIndexer_Queue::workBatch($batchSize, function (string $url, array $settings): ?bool {
+            return SturdyChat_SitemapIndexer_PageIndexer::processUrl($url, $settings);
         });
     }
 

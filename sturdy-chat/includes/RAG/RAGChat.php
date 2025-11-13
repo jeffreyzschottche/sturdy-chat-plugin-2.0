@@ -34,6 +34,16 @@ class SturdyChat_RAG_Chat
             ['role' => 'user',   'content' => "VRAAG:\n" . $question . "\n\nCONTEXT (snippets):\n" . $context],
         ];
 
+        if (class_exists('SturdyChat_Debugger') && SturdyChat_Debugger::isEnabled('show_prompt_context')) {
+            SturdyChat_Debugger_ShowPrompt::logPrompt([
+                'question'    => $question,
+                'context'     => $context,
+                'model'       => $model,
+                'temperature' => $temperature,
+                'messages'    => $messages,
+            ]);
+        }
+
         $response = wp_remote_post($base . '/chat/completions', [
             'headers' => [
                 'Authorization' => 'Bearer ' . $key,

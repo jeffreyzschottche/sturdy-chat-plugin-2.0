@@ -36,6 +36,7 @@ add_filter('sturdychat_sitemap_sslverify', function($verify) {
 $need = [
     'includes/Install.php',
     'includes/Admin/Admin.php',
+    'includes/Debug/debugger.php',
     'includes/Embedder.php',
     'includes/Indexer.php',
     'includes/SitemapIndexer/SitemapIndexer.php',

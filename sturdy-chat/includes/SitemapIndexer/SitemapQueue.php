@@ -53,12 +53,23 @@ final class SturdyChat_SitemapIndexer_Queue
             $batchSize = max(1, $batchSize);
             $slice     = array_slice($queue, $pos, $batchSize);
 
+            $batchLog = [];
             foreach ($slice as $url) {
                 try {
-                    $processor((string) $url, $settings);
+                    $result = $processor((string) $url, $settings);
+                    $status = $result === null ? 'skipped' : 'indexed';
+                    $batchLog[] = [
+                        'url'    => $url,
+                        'status' => $status,
+                    ];
                 } catch (\Throwable $e) {
                     error_log('[SturdyChat] sitemap index error ' . $url . ': ' . $e->getMessage());
                     update_option('sturdychat_sitemap_last_error', '[' . current_time('mysql') . '] ' . $url . ' :: ' . $e->getMessage(), false);
+                    $batchLog[] = [
+                        'url'     => $url,
+                        'status'  => 'error',
+                        'message' => $e->getMessage(),
+                    ];
                 }
 
                 $pos++;
@@ -68,6 +79,14 @@ final class SturdyChat_SitemapIndexer_Queue
                 if ($sleepUs > 0) {
                     usleep($sleepUs);
                 }
+            }
+
+            if (class_exists('SturdyChat_Debugger') && SturdyChat_Debugger::isEnabled('show_sitemap_worker')) {
+                SturdyChat_Debugger_ShowSitemapWorker::logBatch([
+                    'batch'    => $batchLog,
+                    'position' => $pos,
+                    'total'    => $total,
+                ]);
             }
 
             if ($pos < $total && $pos < count($queue)) {

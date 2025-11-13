@@ -121,6 +121,7 @@ class SturdyChat_RAG_Retriever
 
         $queryVector = SturdyChat_Embedder::embed($query, $settings);
 
+        $beforeCosSnapshot = [];
         foreach ($filtered as &$row) {
             $embedding = json_decode((string) ($row['embedding'] ?? '[]'), true);
             $row['cos'] = ($embedding && is_array($embedding)) ? SturdyChat_Embedder::cosine($queryVector, $embedding) : 0.0;
@@ -219,6 +220,9 @@ class SturdyChat_RAG_Retriever
             $row['final'] = (0.5 * $bm25) + (0.4 * $row['cos']) + (0.1 * $coverage) + (0.1 * $numeric) + $boost;
         }
         unset($row);
+        if (SturdyChat_Debugger::isEnabled('show_query_embedding')) {
+            $beforeCosSnapshot = SturdyChat_Debugger_ShowQueryEmbedding::summarizeCandidates($filtered);
+        }
 
         $cosMin = isset($settings['cosine_min']) ? (float) $settings['cosine_min'] : 0.18;
         $filtered = array_values(array_filter($filtered, static function (array $row) use ($cosMin): bool {
@@ -229,6 +233,11 @@ class SturdyChat_RAG_Retriever
         }));
 
         usort($filtered, static fn(array $a, array $b): int => ($a['final'] < $b['final']) ? 1 : -1);
+
+        $afterCosSnapshot = [];
+        if (SturdyChat_Debugger::isEnabled('show_query_embedding')) {
+            $afterCosSnapshot = SturdyChat_Debugger_ShowQueryEmbedding::summarizeCandidates($filtered);
+        }
 
         $documents = [];
         foreach ($filtered as $row) {
@@ -298,8 +307,22 @@ class SturdyChat_RAG_Retriever
             $picked++;
         }
 
+        $contextString = implode("\n\n---\n\n", $contextParts);
+
+        if (SturdyChat_Debugger::isEnabled('show_query_embedding')) {
+            SturdyChat_Debugger_ShowQueryEmbedding::logRetrieval([
+                'query'                  => $query,
+                'query_vector'           => $queryVector,
+                'candidates_before_cos'  => $beforeCosSnapshot,
+                'candidates_after_cos'   => $afterCosSnapshot,
+                'final_sources'          => $sources,
+                'context_character_count'=> mb_strlen($contextString),
+                'top_k'                  => $topK,
+            ]);
+        }
+
         return [
-            'context' => implode("\n\n---\n\n", $contextParts),
+            'context' => $contextString,
             'sources' => $sources,
         ];
     }
