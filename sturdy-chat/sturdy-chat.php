@@ -369,6 +369,9 @@ register_activation_hook(__FILE__, function () {
             'chat_title' => 'Stel je vraag',
         ]);
     }
+    if (false === get_option('sturdychat_cache_enabled', false)) {
+        add_option('sturdychat_cache_enabled', 1, false);
+    }
     if (class_exists('SturdyChat_Install')) {
         SturdyChat_Install::ensureDb();
     }
@@ -395,6 +398,9 @@ add_action('plugins_loaded', function () {
         add_action('admin_menu', ['SturdyChat_Admin', 'registerMenu']);
         add_action('admin_init', ['SturdyChat_Admin', 'registerSettings'], 20);
         add_action('admin_post_sturdychat_index_sitemap', ['SturdyChat_Admin', 'handleIndexSitemap']);
+        add_action('admin_post_sturdychat_cache_enable', ['SturdyChat_Admin', 'handleEnableCache']);
+        add_action('admin_post_sturdychat_cache_disable', ['SturdyChat_Admin', 'handleDisableCache']);
+        add_action('admin_post_sturdychat_cache_reset', ['SturdyChat_Admin', 'handleResetCache']);
 
     }
     if (class_exists('SturdyChat_REST')) {

@@ -44,6 +44,8 @@ class SturdyChat_REST
     public static function handleAsk(WP_REST_Request $req): WP_REST_Response
     {
         $s = get_option('sturdychat_settings', []);
+        $cacheEnabled = (bool) get_option('sturdychat_cache_enabled', 1);
+        $cacheAvailable = $cacheEnabled && class_exists('SturdyChat_Cache');
 
         // Get Query from ?q or JSON body {question:"..."}
         $q = $req->get_param('q');
@@ -59,7 +61,7 @@ class SturdyChat_REST
             ], 400);
         }
 
-        if (class_exists('SturdyChat_Cache')) {
+        if ($cacheAvailable) {
             $cached = SturdyChat_Cache::find($q);
             if (is_array($cached) && isset($cached['answer'])) {
                 return new WP_REST_Response($cached, 200);
@@ -87,7 +89,7 @@ class SturdyChat_REST
                 if ($isFallback) {
                     $sources = [];
                 }
-                if (class_exists('SturdyChat_Cache')) {
+                if ($cacheAvailable) {
                     SturdyChat_Cache::store($q, $answer, $sources);
                 }
                 return new WP_REST_Response([
@@ -124,7 +126,7 @@ class SturdyChat_REST
             if ($isFallback) {
                 $sources = [];
             }
-            if (class_exists('SturdyChat_Cache')) {
+            if ($cacheAvailable) {
                 SturdyChat_Cache::store($q, $answer, $sources);
             }
             return new WP_REST_Response([

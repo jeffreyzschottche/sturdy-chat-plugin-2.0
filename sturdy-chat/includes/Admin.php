@@ -480,6 +480,7 @@ class SturdyChat_Admin
         }
 
         $indexUrl = wp_nonce_url(admin_url('admin-post.php?action=sturdychat_index_sitemap'), 'sturdychat_index_sitemap');
+        $cacheEnabled = (bool) get_option('sturdychat_cache_enabled', 1);
 
         echo '<div class="wrap"><h1>Sturdy Chat (Self-Hosted RAG)</h1>';
 
@@ -491,6 +492,40 @@ class SturdyChat_Admin
         echo '<h2>' . esc_html__('Index sitemap', 'sturdychat-chatbot') . '</h2>';
         echo '<p>' . esc_html__('Crawl the configured sitemap and refresh the vector index used for retrieval.', 'sturdychat-chatbot') . '</p>';
         echo '<p><a class="button button-primary" href="' . esc_url($indexUrl) . '">' . esc_html__('Start indexing', 'sturdychat-chatbot') . '</a></p>';
+        echo '</div>';
+
+        $cacheStatus = $cacheEnabled
+            ? __('Cache staat aan. Herhaalde vragen gebruiken het opgeslagen antwoord.', 'sturdychat-chatbot')
+            : __('Cache staat uit. Antwoorden worden niet opgeslagen of opgehaald.', 'sturdychat-chatbot');
+
+        echo '<div class="card" style="max-width:600px;margin-bottom:20px;">';
+        echo '<h2>' . esc_html__('Cached answers', 'sturdychat-chatbot') . '</h2>';
+        echo '<p>' . esc_html__('Enable caching to reuse answers for repeated questions or reset it to clear stored responses.', 'sturdychat-chatbot') . '</p>';
+        echo '<p><strong>' . esc_html__('Status:', 'sturdychat-chatbot') . '</strong> ' . esc_html($cacheStatus) . '</p>';
+        echo '<div class="sturdychat-cache-actions" style="display:flex;gap:10px;flex-wrap:wrap;">';
+
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" style="margin:0;">';
+        wp_nonce_field('sturdychat_cache_enable');
+        echo '<input type="hidden" name="action" value="sturdychat_cache_enable" />';
+        $enableDisabled = $cacheEnabled ? ' disabled="disabled"' : '';
+        echo '<button type="submit" class="button button-primary"' . $enableDisabled . '>' . esc_html__('Enable cache', 'sturdychat-chatbot') . '</button>';
+        echo '</form>';
+
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" style="margin:0;">';
+        wp_nonce_field('sturdychat_cache_disable');
+        echo '<input type="hidden" name="action" value="sturdychat_cache_disable" />';
+        $disableDisabled = $cacheEnabled ? '' : ' disabled="disabled"';
+        echo '<button type="submit" class="button button-secondary"' . $disableDisabled . '>' . esc_html__('Disable cache', 'sturdychat-chatbot') . '</button>';
+        echo '</form>';
+
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" style="margin:0;">';
+        wp_nonce_field('sturdychat_cache_reset');
+        echo '<input type="hidden" name="action" value="sturdychat_cache_reset" />';
+        $confirmReset = esc_js(__('Resetting removes every cached answer. Continue?', 'sturdychat-chatbot'));
+        echo '<button type="submit" class="button button-secondary button-small" onclick="return confirm(\'' . $confirmReset . '\');">' . esc_html__('Reset cache', 'sturdychat-chatbot') . '</button>';
+        echo '</form>';
+
+        echo '</div>';
         echo '</div>';
 
         echo '<form method="post" action="options.php">';
@@ -955,8 +990,78 @@ class SturdyChat_Admin
         $res = SturdyChat_SitemapIndexer::indexAll($s);
 
         $msg = $res['ok'] ? $res['message'] : ('Failed: ' . $res['message']);
+        self::redirectSettingsWithMessage($msg);
+    }
+
+    /**
+     * Enable the cached answers feature.
+     */
+    public static function handleEnableCache(): void
+    {
+        self::guardCacheAction('sturdychat_cache_enable');
+        update_option('sturdychat_cache_enabled', 1, false);
+        self::redirectSettingsWithMessage(__('Cache is ingeschakeld. Antwoorden worden opnieuw gebruikt.', 'sturdychat-chatbot'));
+    }
+
+    /**
+     * Disable the cached answers feature.
+     */
+    public static function handleDisableCache(): void
+    {
+        self::guardCacheAction('sturdychat_cache_disable');
+        update_option('sturdychat_cache_enabled', 0, false);
+        self::redirectSettingsWithMessage(__('Cache is uitgeschakeld. Antwoorden worden niet langer opgeslagen.', 'sturdychat-chatbot'));
+    }
+
+    /**
+     * Reset the cached answers table.
+     */
+    public static function handleResetCache(): void
+    {
+        self::guardCacheAction('sturdychat_cache_reset');
+
+        if (!defined('STURDYCHAT_TABLE_CACHE')) {
+            self::redirectSettingsWithMessage(__('Cache tabel niet gevonden.', 'sturdychat-chatbot'));
+        }
+
+        global $wpdb;
+        $table = STURDYCHAT_TABLE_CACHE;
+
+        $count = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table}");
+        $cleared = $wpdb->query("TRUNCATE TABLE {$table}");
+        if ($cleared === false) {
+            $cleared = $wpdb->query("DELETE FROM {$table}");
+        }
+
+        if ($cleared === false) {
+            self::redirectSettingsWithMessage(__('Cache reset is mislukt. Controleer database rechten.', 'sturdychat-chatbot'));
+        }
+
+        $msg = sprintf(
+            _n('Cache gereset. %d cached answer verwijderd.', 'Cache gereset. %d cached answers verwijderd.', $count, 'sturdychat-chatbot'),
+            $count
+        );
+        self::redirectSettingsWithMessage($msg);
+    }
+
+    /**
+     * Ensure the user can manage options and the request contains a valid nonce.
+     */
+    private static function guardCacheAction(string $nonceAction): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('Forbidden');
+        }
+        check_admin_referer($nonceAction);
+    }
+
+    /**
+     * Redirect back to the settings page with a notice message.
+     */
+    private static function redirectSettingsWithMessage(string $message): void
+    {
         wp_safe_redirect(add_query_arg(
-            ['page' => 'sturdychat', 'msg' => rawurlencode($msg)],
+            ['page' => 'sturdychat', 'msg' => rawurlencode($message)],
             admin_url('admin.php')
         ));
         exit;
